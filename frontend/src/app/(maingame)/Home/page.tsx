@@ -7,23 +7,23 @@ import { useRouter } from "next/navigation";
 import { useAccount } from "wagmi";
 import { useQueryClient } from "@tanstack/react-query";
 import Modal from "@/component/ResuableModal";
-import GlowingEffect from "@/component/GlowingEffectProps";
 import BackgroundImgBlur from "@/component/BackgroundBlur";
 import GameCard from "@/component/GameCard";
 import GameFilter from "@/component/GameFilter";
 import CreateGameModal from "@/component/CreateGameModal";
-import { useActiveGames, useMyGames, useGameStatus } from "@/hooks/useGame";
+import StakeModal from "@/component/StakeModal";
+import { useActiveGames, useMyGames, useGameStatus, useUserStats, useTotalGames } from "@/hooks/useGame";
 import { GameStatus, GameInfo } from "@/lib/contractCalls";
 import { useGameStore } from "@/store/gameStore";
+import { formatEther } from "viem";
 
-// ---------- Fonts ----------
 const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "700"] });
 
-// ---------- Main Page ----------
 export default function HomePage() {
   const { isConnected, address } = useAccount();
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isCreateGameOpen, setIsCreateGameOpen] = useState(false);
+  const [isStakeModalOpen, setIsStakeModalOpen] = useState(false);
 
   const {
     activeTab,
@@ -33,38 +33,28 @@ export default function HomePage() {
     activeGames,
     setActiveGames,
     setMyGames,
+    selectedGame,
+    setSelectedGame,
   } = useGameStore();
 
-  const { data: fetchedActiveGames = [], isLoading: isLoadingGames } =
-    useActiveGames();
-  const { data: fetchedMyGames = [], isLoading: isLoadingMyGames } =
-    useMyGames();
+  const { data: fetchedActiveGames = [], isLoading: isLoadingGames } = useActiveGames();
+  const { data: fetchedMyGames = [], isLoading: isLoadingMyGames } = useMyGames();
 
   useEffect(() => {
-    if (fetchedActiveGames.length > 0) {
-      setActiveGames(fetchedActiveGames);
-    }
+    if (fetchedActiveGames.length > 0) setActiveGames(fetchedActiveGames);
   }, [fetchedActiveGames, setActiveGames]);
 
   useEffect(() => {
-    if (fetchedMyGames.length > 0) {
-      console.log("HomePage: Setting myGames in store:", fetchedMyGames);
-      setMyGames(fetchedMyGames);
-    }
+    if (fetchedMyGames.length > 0) setMyGames(fetchedMyGames);
   }, [fetchedMyGames, setMyGames]);
 
-  // Filter active games based on store filters
   const filteredActiveGames = activeGames
     .filter((game) => {
       const stakeInCelo = Number(game.stake) / 1e18;
-      return (
-        stakeInCelo >= Number(filters.minStake) && game.status === filters.status
-      );
+      return stakeInCelo >= Number(filters.minStake) && game.status === filters.status;
     })
     .sort(() => {
-      if (filters.sortBy === "newest") {
-        return filters.sortOrder === "desc" ? -1 : 1;
-      }
+      if (filters.sortBy === "newest") return filters.sortOrder === "desc" ? -1 : 1;
       return 0;
     });
 
@@ -74,33 +64,43 @@ export default function HomePage() {
     filters.minStake !== "0" ||
     filters.status !== GameStatus.Active;
 
+  const handleGameCardClick = (game: GameInfo) => {
+    setSelectedGame(game);
+    setIsStakeModalOpen(true);
+  };
+
   return (
     <BackgroundImgBlur>
-      <div className={`${openSans.className} relative w-full min-h-screen`}>
-        {/* Header Section */}
-        <div className="fixed top-0 rounded-lg z-50 left-1/2 transform -translate-x-1/2 mt-2 py-3 px-4 sm:px-8 transition-all duration-300 bg-[#030b1f] w-[95%] sm:w-auto">
-          <h2 className="text-white text-xl sm:text-2xl mb-1 font-bold text-center">
-            Welcome to <span className="text-red-500">Breevs</span>
-          </h2>
-          <p className="text-sm text-white text-center">
-            Join the ultimate game of chance and strategy to
-            <span className="text-red-500"> WIN BIG!!!</span>
-          </p>
+      <div className={`${openSans.className} relative w-full min-h-screen bg-[#030B1F]/60`}>
+
+        {/* Top header */}
+        <div className="fixed top-0 z-50 w-full bg-[#030B1F]/90 backdrop-blur-md border-b border-white/5">
+          <div className="max-w-screen-xl mx-auto px-4 py-3 sm:py-4 text-center">
+            <h1 className="text-white text-xl sm:text-2xl font-bold tracking-tight">
+              Welcome to <span className="text-red-500">Breevs</span>
+            </h1>
+            <p className="text-xs sm:text-sm text-gray-400 mt-0.5">
+              Russian Roulette on Celo —{" "}
+              <span className="text-amber-400 font-semibold">Last survivor wins it all</span>
+            </p>
+          </div>
         </div>
 
-        {/* Main Content */}
-        <div className="pt-32 sm:pt-28 w-full max-w-screen-xl mx-auto px-4 pb-20">
+        {/* Main content */}
+        <div className="pt-24 sm:pt-28 w-full max-w-screen-xl mx-auto px-4 pb-24">
+
           {/* Modals */}
-          <CreateGameModal
-            isOpen={isCreateGameOpen}
-            onClose={() => setIsCreateGameOpen(false)}
+          <CreateGameModal isOpen={isCreateGameOpen} onClose={() => setIsCreateGameOpen(false)} />
+          <StakeModal
+            isOpen={isStakeModalOpen}
+            onClose={() => { setIsStakeModalOpen(false); setSelectedGame(null); }}
           />
 
+          {/* Filter modal */}
           <Modal isOpen={isFilterOpen} onClose={() => setIsFilterOpen(false)}>
-            <div className="bg-[#0B1445] text-white text-center p-6 rounded-2xl">
-              <GlowingEffect className="top-[63px] left-[47px]" />
-              <h2 className="text-[25px] font-bold mb-4">Filter Games</h2>
-              <div className="bg-[#0f1c5c] p-2 rounded-xl mb-6">
+            <div className="bg-[#030B1F] text-white text-center p-6 rounded-2xl border border-white/10 max-w-sm w-full">
+              <h2 className="text-xl font-bold mb-5 text-white">Filter Games</h2>
+              <div className="bg-[#0B1445]/80 p-3 rounded-xl mb-4 border border-white/10">
                 <GameFilter
                   onFilterChange={(newFilters) => {
                     setFilters({
@@ -117,16 +117,16 @@ export default function HomePage() {
           </Modal>
 
           {/* Tabs & Controls */}
-          <div className="flex flex-col sm:flex-row justify-center items-center gap-4 mb-6">
-            <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-1 inline-flex shadow-lg">
+          <div className="flex flex-col sm:flex-row justify-center items-center gap-3 mb-6">
+            <div className="bg-[#0B1445]/80 border border-white/10 rounded-xl p-1 inline-flex shadow-lg">
               {["active", "my-games"].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab as "active" | "my-games")}
-                  className={`px-4 sm:px-8 py-2.5 rounded-lg transition-all duration-300 text-sm sm:text-base font-semibold ${
+                  className={`px-5 sm:px-8 py-2 rounded-lg transition-all duration-300 text-sm font-semibold ${
                     activeTab === tab
-                      ? "bg-gradient-to-r from-red-600 to-red-500 text-white shadow-lg"
-                      : "text-gray-400 hover:text-white hover:bg-gray-700/50"
+                      ? "bg-red-600 text-white shadow-lg shadow-red-600/30"
+                      : "text-gray-400 hover:text-white hover:bg-white/5"
                   }`}
                 >
                   {tab === "active" ? "Active Games" : "My Games"}
@@ -136,26 +136,17 @@ export default function HomePage() {
 
             {isConnected && activeTab === "active" && (
               <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
                 onClick={() => setIsFilterOpen(true)}
-                className="bg-gray-800/80 backdrop-blur-sm text-white px-4 py-2.5 rounded-xl flex items-center gap-2 hover:bg-gray-700/80 text-sm sm:text-base font-semibold shadow-lg border border-gray-700/50 relative"
+                className="bg-[#0B1445]/80 border border-white/10 text-white px-4 py-2 rounded-xl flex items-center gap-2 hover:border-red-500/30 hover:bg-white/5 text-sm font-semibold shadow-lg relative transition-colors"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z"
-                    clipRule="evenodd"
-                  />
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
                 </svg>
                 Filter
                 {isFiltersApplied && (
-                  <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-red-500 animate-pulse"></span>
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
                 )}
               </motion.button>
             )}
@@ -163,31 +154,218 @@ export default function HomePage() {
 
           {/* Game Grids */}
           {!isConnected ? (
-            <div className="text-center py-10">
-              <p className="text-gray-400 mb-4">
-                Connect your wallet to create or join games.
-              </p>
-            </div>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-center py-20"
+            >
+              <div className="bg-[#0B1445]/80 border border-white/10 rounded-2xl p-10 max-w-sm mx-auto">
+                <div className="text-4xl mb-4">🎰</div>
+                <h3 className="text-lg font-bold text-white mb-2">Connect to Play</h3>
+                <p className="text-gray-500 text-sm">
+                  Connect your wallet to view and join Russian Roulette games on Celo.
+                </p>
+              </div>
+            </motion.div>
           ) : isLoadingGames || isLoadingMyGames ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
               {[1, 2, 3, 4].map((i) => (
-                <div
-                  key={i}
-                  className="bg-[#191F57CF] p-6 rounded-lg animate-pulse h-48"
-                />
+                <div key={i} className="bg-[#0B1445]/80 border border-white/5 p-6 rounded-2xl animate-pulse h-52" />
               ))}
             </div>
           ) : activeTab === "active" ? (
             <ActiveGamesGrid
               games={filteredActiveGames}
               setIsCreateGameOpen={setIsCreateGameOpen}
+              onJoinClick={handleGameCardClick}
             />
           ) : (
             <MyGamesGrid address={address!} />
           )}
+
+          {/* ── Side Attractions ──────────────────────────────────── */}
+          {isConnected && address && (
+            <div className="mt-10 space-y-6">
+              <DailyMissions address={address} />
+              <Achievements address={address} />
+            </div>
+          )}
+          <PlatformStats activeCount={activeGames.length} />
         </div>
       </div>
     </BackgroundImgBlur>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// DAILY MISSIONS
+// ─────────────────────────────────────────────────────────────────
+function DailyMissions({ address }: { address: string }) {
+  const { data: stats } = useUserStats(address);
+  const { myGames } = useGameStore();
+
+  const today = new Date().toDateString();
+  const storageKey = `breevs_missions_${address}_${today}`;
+
+  const getCompleted = (): string[] => {
+    try { return JSON.parse(localStorage.getItem(storageKey) || "[]"); } catch { return []; }
+  };
+
+  const completed = getCompleted();
+
+  const inActiveGame = myGames.some(
+    (g) => g.status === GameStatus.Active || g.status === GameStatus.InProgress
+  );
+  const inRound3Plus = myGames.some(
+    (g) => g.status === GameStatus.InProgress && g.currentRound >= 3
+  );
+  const wonToday = (stats?.gamesWon ?? 0) > 0;
+
+  const missions = [
+    {
+      id: "join",
+      icon: "🎮",
+      label: "Join or create a game today",
+      reward: "🎖️ Contender Badge",
+      done: inActiveGame || completed.includes("join"),
+    },
+    {
+      id: "survive",
+      icon: "⚔️",
+      label: "Survive into Round 3",
+      reward: "💀 Survivor Badge",
+      done: inRound3Plus || completed.includes("survive"),
+    },
+    {
+      id: "win",
+      icon: "🏆",
+      label: "Win a game",
+      reward: "👑 Champion Badge",
+      done: wonToday || completed.includes("win"),
+    },
+  ];
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-lg">🎯</span>
+        <h3 className="text-white font-bold text-base">Daily Missions</h3>
+        <span className="text-xs text-gray-500 ml-auto">Resets midnight UTC</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {missions.map((m) => (
+          <motion.div
+            key={m.id}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`relative p-4 rounded-xl border transition-all duration-300 ${
+              m.done
+                ? "bg-green-900/20 border-green-500/30"
+                : "bg-[#0B1445]/60 border-red-500/10 hover:border-red-500/30"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">{m.icon}</span>
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs font-semibold leading-tight ${m.done ? "text-green-300" : "text-white"}`}>
+                  {m.label}
+                </p>
+                <p className="text-[10px] text-amber-400 font-bold mt-1">{m.reward}</p>
+              </div>
+              {m.done && (
+                <span className="text-green-400 text-lg flex-shrink-0">✓</span>
+              )}
+            </div>
+            {m.done && (
+              <div className="absolute inset-0 rounded-xl bg-green-500/5 pointer-events-none" />
+            )}
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// ACHIEVEMENTS
+// ─────────────────────────────────────────────────────────────────
+function Achievements({ address }: { address: string }) {
+  const { data: stats } = useUserStats(address);
+
+  const gamesPlayed = stats?.gamesPlayed ?? 0;
+  const gamesWon = stats?.gamesWon ?? 0;
+  const totalWinnings = stats?.totalWinnings ?? 0n;
+
+  const achievements = [
+    { id: "first_blood", icon: "🩸", label: "First Blood", desc: "Play your first game", unlocked: gamesPlayed >= 1 },
+    { id: "survivor", icon: "💀", label: "Survivor", desc: "Play 3 games", unlocked: gamesPlayed >= 3 },
+    { id: "champion", icon: "🏆", label: "Champion", desc: "Win a game", unlocked: gamesWon >= 1 },
+    { id: "high_roller", icon: "💎", label: "High Roller", desc: "Win 10+ CELO total", unlocked: totalWinnings >= BigInt(10e18) },
+    { id: "veteran", icon: "⭐", label: "Veteran", desc: "Play 5 games", unlocked: gamesPlayed >= 5 },
+    { id: "legend", icon: "👑", label: "Legend", desc: "Win 3 games", unlocked: gamesWon >= 3 },
+  ];
+
+  const unlockedCount = achievements.filter((a) => a.unlocked).length;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-lg">🏅</span>
+        <h3 className="text-white font-bold text-base">Achievements</h3>
+        <span className="ml-auto text-xs text-gray-500">{unlockedCount}/{achievements.length} unlocked</span>
+      </div>
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+        {achievements.map((a) => (
+          <motion.div
+            key={a.id}
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            whileHover={{ scale: 1.08, y: -2 }}
+            title={`${a.label}: ${a.desc}`}
+            className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border cursor-default transition-all duration-300 ${
+              a.unlocked
+                ? "bg-gradient-to-br from-amber-500/20 to-red-900/20 border-amber-500/40 shadow-md shadow-amber-500/10"
+                : "bg-white/3 border-white/5 opacity-40 grayscale"
+            }`}
+          >
+            <span className={`text-2xl ${a.unlocked ? "" : "filter grayscale"}`}>{a.icon}</span>
+            <span className="text-[9px] text-center font-semibold text-gray-300 leading-tight">{a.label}</span>
+            {a.unlocked && (
+              <div className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-sm shadow-amber-400/60" />
+            )}
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// PLATFORM STATS BAR
+// ─────────────────────────────────────────────────────────────────
+function PlatformStats({ activeCount }: { activeCount: number }) {
+  const { data: gameCounter } = useTotalGames();
+  const total = Number(gameCounter ?? 0n);
+
+  const stats = [
+    { icon: "🎮", label: "Total Games", value: total.toLocaleString() },
+    { icon: "🔴", label: "Live Now", value: activeCount > 0 ? `${activeCount} rooms` : "—" },
+    { icon: "💀", label: "Max Players", value: "6 per game" },
+    { icon: "🏆", label: "Winner Takes", value: "All CELO" },
+  ];
+
+  return (
+    <div className="mt-6 mb-20 bg-[#030B1F]/60 border border-red-500/10 rounded-2xl p-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {stats.map((s) => (
+          <div key={s.label} className="text-center">
+            <div className="text-xl mb-1">{s.icon}</div>
+            <p className="text-white font-bold text-sm sm:text-base">{s.value}</p>
+            <p className="text-gray-500 text-[10px] uppercase tracking-widest">{s.label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -195,9 +373,11 @@ export default function HomePage() {
 function ActiveGamesGrid({
   games,
   setIsCreateGameOpen,
+  onJoinClick,
 }: {
   games: GameInfo[];
   setIsCreateGameOpen: (open: boolean) => void;
+  onJoinClick: (game: GameInfo) => void;
 }) {
   const router = useRouter();
 
@@ -208,43 +388,29 @@ function ActiveGamesGrid({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6"
+          className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-5"
         >
-          {/* Create Game Button */}
+          {/* Create Game button */}
           <motion.button
-            whileHover={{ scale: 1.03, y: -5 }}
-            whileTap={{ scale: 0.98 }}
+            whileHover={{ scale: 1.03, y: -4 }}
+            whileTap={{ scale: 0.97 }}
             onClick={() => setIsCreateGameOpen(true)}
-            className="w-full border-2 border-dashed border-red-500/50 bg-gradient-to-br from-red-500/5 to-purple-500/5 backdrop-blur-sm text-white rounded-2xl hover:border-red-500 hover:bg-red-500/10 transition-all duration-300 flex flex-col items-center relative group p-5 shadow-lg hover:shadow-red-500/20"
+            className="w-full border-2 border-dashed border-red-500/40 bg-gradient-to-br from-red-500/5 to-red-900/5 text-white rounded-2xl hover:border-red-500/70 hover:bg-red-500/10 transition-all duration-300 flex flex-col items-center relative group p-5 shadow-lg hover:shadow-red-500/10 min-h-[200px]"
           >
-            <div className="flex flex-col items-center justify-center h-full gap-2 sm:gap-3">
-              <div className="p-2 sm:p-3 rounded-full border-2 border-dashed border-red-500/50 group-hover:border-red-500 transition-all duration-300 group-hover:scale-110 bg-red-500/10">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-6 w-6 sm:h-8 sm:w-8 text-red-500"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 4v16m8-8H4"
-                  />
+            <div className="flex flex-col items-center justify-center h-full gap-3">
+              <div className="p-3 rounded-full border-2 border-dashed border-red-500/40 group-hover:border-red-500/70 transition-all duration-300 group-hover:scale-110 bg-red-500/10">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
               </div>
               <div className="text-center">
-                <span className="text-sm sm:text-base font-bold block mb-0.5 sm:mb-1">
-                  Create New Game
-                </span>
-                <span className="text-xs text-gray-400">
-                  Start your own game room
-                </span>
+                <span className="text-sm font-bold block mb-1 text-white">Create Game</span>
+                <span className="text-xs text-gray-500">Start your own room</span>
               </div>
             </div>
           </motion.button>
-          {/* Active Games */}
+
+          {/* Game cards */}
           {games.map((game, index) => (
             <motion.div
               key={game.gameId.toString()}
@@ -254,7 +420,7 @@ function ActiveGamesGrid({
             >
               <GameDataLoader
                 game={game}
-                onClick={() => router.push(`/GameScreen/${game.gameId}`)}
+                onClick={() => onJoinClick(game)}
               />
             </motion.div>
           ))}
@@ -267,29 +433,18 @@ function ActiveGamesGrid({
           animate={{ opacity: 1 }}
           className="col-span-full text-center py-20"
         >
-          <div className="bg-gradient-to-br from-[#030b1f]/90 to-[#0a1529]/90 backdrop-blur-md rounded-2xl border border-gray-700/30 p-8 max-w-md mx-auto">
-            <div className="w-16 h-16 bg-gray-700/30 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-8 w-8 text-gray-500"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
-                />
-              </svg>
-            </div>
-            <h3 className="text-lg font-bold text-white mb-2">
-              No Games Found
-            </h3>
-            <p className="text-gray-400 text-sm">
-              Create a new game to get started!
+          <div className="bg-[#0B1445]/80 border border-white/10 rounded-2xl p-10 max-w-md mx-auto">
+            <div className="text-4xl mb-4">🎰</div>
+            <h3 className="text-lg font-bold text-white mb-2">No Active Games</h3>
+            <p className="text-gray-500 text-sm mb-5">
+              No games are running right now. Create one and invite players!
             </p>
+            <button
+              onClick={() => setIsCreateGameOpen(true)}
+              className="bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-6 rounded-xl transition-colors text-sm shadow-lg shadow-red-600/30"
+            >
+              Create Game Room
+            </button>
           </div>
         </motion.div>
       )}
@@ -305,10 +460,7 @@ function MyGamesGrid({ address }: { address: string }) {
   const router = useRouter();
 
   useEffect(() => {
-    if (fetchedMyGames) {
-      console.log("MyGamesGrid: Setting myGames in store:", fetchedMyGames);
-      setMyGames(fetchedMyGames);
-    }
+    if (fetchedMyGames) setMyGames(fetchedMyGames);
   }, [fetchedMyGames, setMyGames]);
 
   const { myGames: storeMyGames } = useGameStore();
@@ -317,16 +469,27 @@ function MyGamesGrid({ address }: { address: string }) {
     queryClient.resetQueries({ queryKey: ["myGames", address] });
   };
 
-  if (isLoading)
+  if (isLoading) {
     return (
-      <div className="text-center py-10 text-gray-400">
-        Loading your games...
+      <div className="text-center py-10 text-gray-500">
+        <div className="animate-pulse">Loading your games...</div>
       </div>
     );
-  if (!storeMyGames?.length)
+  }
+
+  if (!storeMyGames?.length) {
     return (
-      <div className="text-center py-10 text-gray-400">No games found.</div>
+      <div className="text-center py-20">
+        <div className="bg-[#0B1445]/80 border border-white/10 rounded-2xl p-10 max-w-md mx-auto">
+          <div className="text-4xl mb-4">🎯</div>
+          <h3 className="text-lg font-bold text-white mb-2">No Games Yet</h3>
+          <p className="text-gray-500 text-sm">
+            You haven&apos;t joined any games. Head to Active Games to get started.
+          </p>
+        </div>
+      </div>
     );
+  }
 
   const activeGames = storeMyGames.filter(
     (g) => g.status === GameStatus.Active || g.status === GameStatus.InProgress
@@ -336,22 +499,18 @@ function MyGamesGrid({ address }: { address: string }) {
   return (
     <div className="space-y-10">
       {myGamesError && (
-        <div className="mb-4 p-2 bg-red-900 rounded text-red-300 text-sm">
-          {myGamesError.message}
-          <button
-            onClick={clearMyGamesError}
-            className="ml-2 text-red-200 hover:text-red-100"
-          >
-            ✕
-          </button>
+        <div className="mb-4 p-3 bg-red-900/20 border border-red-500/30 rounded-xl text-red-300 text-sm flex justify-between items-center">
+          <span>{myGamesError.message}</span>
+          <button onClick={clearMyGamesError} className="text-red-400 hover:text-red-200 ml-2">×</button>
         </div>
       )}
       {activeGames.length > 0 && (
         <section>
-          <h3 className="text-xl font-semibold text-white mb-4">
+          <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse inline-block" />
             Active Games
           </h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
             {activeGames.map((game) => (
               <GameDataLoader
                 key={game.gameId.toString()}
@@ -365,10 +524,11 @@ function MyGamesGrid({ address }: { address: string }) {
 
       {endedGames.length > 0 && (
         <section>
-          <h3 className="text-xl font-semibold text-white mb-4">
+          <h3 className="text-base font-bold text-gray-400 mb-4 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-gray-500 inline-block" />
             Completed Games
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
             {endedGames.map((game) => (
               <GameDataLoader
                 key={game.gameId.toString()}
@@ -384,24 +544,17 @@ function MyGamesGrid({ address }: { address: string }) {
 }
 
 // ---------- Game Data Loader ----------
-function GameDataLoader({
-  game,
-  onClick,
-}: {
-  game: GameInfo;
-  onClick: () => void;
-}) {
+function GameDataLoader({ game, onClick }: { game: GameInfo; onClick: () => void }) {
   const { data: fullGame, isLoading, error } = useGameStatus(game.gameId);
   const queryClient = useQueryClient();
 
   const clearError = () => {
-    queryClient.resetQueries({
-      queryKey: ["gameStatus", game.gameId.toString()],
-    });
+    queryClient.resetQueries({ queryKey: ["gameStatus", game.gameId.toString()] });
   };
 
-  if (isLoading || !fullGame)
-    return <div className="bg-[#191F57CF] p-6 rounded-lg animate-pulse h-48" />;
+  if (isLoading || !fullGame) {
+    return <div className="bg-[#0B1445]/80 border border-white/5 p-6 rounded-2xl animate-pulse h-52" />;
+  }
 
   return (
     <GameCard

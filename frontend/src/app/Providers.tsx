@@ -5,18 +5,22 @@ import { getDefaultConfig, RainbowKitProvider } from "@rainbow-me/rainbowkit";
 import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { celoSepolia as _celoSepolia } from "wagmi/chains";
-import { http } from "wagmi";
+import { http, fallback } from "wagmi";
 import { ReactNode } from "react";
 
-const sepoliaRpc =
-  process.env.NEXT_PUBLIC_CELO_RPC_URL || "https://celo-sepolia.drpc.org";
+const FORNO_RPC = "https://forno.celo-sepolia.celo-testnet.org";
+
+const sepoliaRpcs = [
+  FORNO_RPC,
+  process.env.NEXT_PUBLIC_CELO_RPC_URL,
+].filter(Boolean) as string[];
 
 // Override rpcUrls so MetaMask receives our RPC when wallet_addEthereumChain is called
 export const celoSepolia = {
   ..._celoSepolia,
   rpcUrls: {
-    default: { http: [sepoliaRpc] },
-    public: { http: [sepoliaRpc] },
+    default: { http: sepoliaRpcs },
+    public: { http: sepoliaRpcs },
   },
 } as const;
 
@@ -26,7 +30,7 @@ const config = getDefaultConfig({
     process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "breevsrussianroulette",
   chains: [celoSepolia],
   transports: {
-    [_celoSepolia.id]: http(sepoliaRpc),
+    [_celoSepolia.id]: fallback(sepoliaRpcs.map((url) => http(url))),
   },
   ssr: true,
 });

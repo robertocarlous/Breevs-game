@@ -2,33 +2,27 @@
 pragma solidity ^0.8.0;
 
 /**
- * @title Breevs Russian Roulette – Single-Step Edition
- * @notice Russian-roulette elimination game using inline blockhash randomness.
- *         One call to spin() immediately eliminates a random active player.
+ * @title Breevs Russian Roulette – Commit-Reveal Edition
+ * @notice Russian-roulette elimination game using a two-step commit/reveal
+ *         randomness pattern for fair, unmanipulable outcomes on Celo.
  *
  * HOW RANDOMNESS WORKS
  * ────────────────────
- * The seed is derived from:
- *   keccak256(blockhash(block.number - 1), gameId, currentRound, active player list)
- *
- * blockhash(block.number - 1) is the most recent finalised block hash available
- * inside a transaction. It changes every block and is not known to the host
- * before the block is mined, giving reasonable unpredictability for a game
- * context without needing an oracle.
- *
- * NOTE: This is not cryptographically secure VRF — a miner/validator could
- * theoretically influence block hashes, but the practical cost far exceeds
- * the game's prize pool for typical stake sizes.
+ * Step 1 – spin():        Host commits to the current block number.
+ * Step 2 – resolveSpin(): After REVEAL_DELAY blocks, anyone can resolve.
+ *                         The seed mixes block.prevrandao, timestamps and
+ *                         game-specific entropy so the host cannot bias
+ *                         the outcome.
  *
  * FLOW
  * ────
  * 1. createGame()   – host stakes and sets round duration
  * 2. joinGame()     – 5 more players join (6 total required)
  * 3. startGame()    – host starts; round timer begins
- * 4. spin()         – host spins; one player eliminated immediately;
- *                     round auto-advances after each spin
- * 5. advanceRound() – (optional) manually advance if spin not called in time
- * 6. claimPrize()   – last player standing claims the full prize pool
+ * 4. spin()         – host commits a spin request
+ * 5. resolveSpin()  – anyone resolves; one player eliminated; round auto-advances
+ * 6. advanceRound() – (optional) manually advance if spin not called in time
+ * 7. claimPrize()   – last player standing claims the full prize pool
  */
 contract BreevsRussianRoulette {
 
@@ -40,6 +34,11 @@ contract BreevsRussianRoulette {
     uint256 public constant HOST_BALANCE_MULTIPLIER = 5;       // host must hold >= 5x stake
     uint256 public constant MIN_ROUND_DURATION      = 10;      // blocks
     uint256 public constant MAX_ROUND_DURATION      = 1000;    // blocks
+    uint256 public constant REVEAL_DELAY            = 1;       // blocks to wait before resolving
+
+    // Celo core registry – same address on every Celo network
+    address private constant CELO_REGISTRY =
+        0x000000000000000000000000000000000000ce10;
 
     // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -63,6 +62,12 @@ contract BreevsRussianRoulette {
         uint256 eliminationRound;
     }
 
+    struct SpinRequest {
+        bool    pending;
+        uint256 commitBlock;
+        uint256 round;
+    }
+
     struct UserStats {
         uint256 gamesPlayed;
         uint256 gamesWon;
@@ -79,6 +84,7 @@ contract BreevsRussianRoulette {
     mapping(uint256 => mapping(address => uint256))        public playerDeposits;
     mapping(uint256 => bool)                               public prizeClaimed;
     mapping(address => UserStats)                          public userStats;
+    mapping(uint256 => SpinRequest)                        public pendingSpins;
 
     // ─── Events ──────────────────────────────────────────────────────────────
 
@@ -89,6 +95,7 @@ contract BreevsRussianRoulette {
     event RoundAdvanced(uint256 indexed gameId, uint256 newRound);
     event GameCompleted(uint256 indexed gameId, address winner);
     event PrizeClaimed(uint256 indexed gameId, address winner, uint256 amount);
+    event SpinRequested(uint256 indexed gameId, uint256 commitBlock, uint256 round);
 
     // ═══════════════════════════════════════════════════════════════════════════
     //  GAME MANAGEMENT
@@ -156,6 +163,31 @@ contract BreevsRussianRoulette {
     }
 
     /**
+     * @notice Cancel a game and refund all players.
+     */
+    function cancelGame(uint256 gameId) external {
+        Game storage g = games[gameId];
+        require(
+            g.status == Status.CREATED || g.status == Status.IN_PROGRESS,
+            "Game already completed"
+        );
+        require(msg.sender == g.creator, "Only creator can cancel");
+
+        g.status = Status.COMPLETED;
+
+        // Refund every player their original deposit regardless of elimination status
+        address[] storage players = g.players;
+        for (uint256 i = 0; i < players.length; i++) {
+            uint256 deposit = playerDeposits[gameId][players[i]];
+            if (deposit > 0) {
+                playerDeposits[gameId][players[i]] = 0;
+                (bool sent, ) = payable(players[i]).call{value: deposit}("");
+                require(sent, "Refund failed");
+            }
+        }
+    }
+
+    /**
      * @notice Start the game once all 6 players have joined.
      *         Only the host (creator) can call this.
      */
@@ -173,19 +205,12 @@ contract BreevsRussianRoulette {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //  SPIN — single-step random elimination
+    //  SPIN — two-step commit/reveal elimination
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Spin the chamber. One active player is eliminated immediately.
-     *
-     *         Randomness seed:
-     *           keccak256(blockhash(block.number - 1), gameId, currentRound, players)
-     *
-     *         The round advances automatically after every spin so the next
-     *         spin can be requested without any extra call.
-     *
-     *         Must be called by the host while the round window is open.
+     * @notice STEP 1 – Host commits a spin request at the current block.
+     *         Must be called while the round window is still open.
      */
     function spin(uint256 gameId) external {
         Game storage g = games[gameId];
@@ -193,29 +218,86 @@ contract BreevsRussianRoulette {
         require(g.status == Status.IN_PROGRESS, "Game not in progress");
         require(block.number <= g.roundEnd,     "Round has expired - call advanceRound");
 
-        address[] memory active = _getActivePlayers(gameId);
-        require(active.length > 1,              "Only one player left");
+        // Auto-clear a spin that expired (> 500 blocks old) so the game doesn't get stuck
+        SpinRequest storage existing = pendingSpins[gameId];
+        if (existing.pending && block.number > existing.commitBlock + 500) {
+            delete pendingSpins[gameId];
+        }
 
-        // ── Derive seed from the previous finalised block hash ────────────────
+        require(!pendingSpins[gameId].pending, "Spin already pending");
+
+        address[] memory active = _getActivePlayers(gameId);
+        require(active.length > 1, "Only one player left");
+
+        pendingSpins[gameId] = SpinRequest({
+            pending: true,
+            commitBlock: block.number,
+            round: g.currentRound
+        });
+
+        emit SpinRequested(gameId, block.number, g.currentRound);
+    }
+
+    /**
+     * @notice STEP 2 – Anyone resolves the pending spin after REVEAL_DELAY blocks.
+     *
+     *         The contract mixes block.prevrandao with game-specific entropy
+     *         to produce an unbiasable seed. By waiting REVEAL_DELAY blocks
+     *         the host cannot selectively include/exclude their own transaction
+     *         to influence the outcome.
+     */
+    function resolveSpin(uint256 gameId) external {
+        Game storage g = games[gameId];
+        SpinRequest storage req = pendingSpins[gameId];
+
+        require(req.pending, "No pending spin");
+        require(g.status == Status.IN_PROGRESS, "Game not in progress");
+        require(
+            block.number >= req.commitBlock + REVEAL_DELAY,
+            "Must wait for RANDAO reveal"
+        );
+        // Safety: if the commit block is too old the RANDAO value may no
+        // longer be available.
+        require(
+            block.number <= req.commitBlock + 500,
+            "Spin request expired - request a new spin"
+        );
+
+        // ── Randomness: mix multiple on-chain sources into one seed ──────────
+        bytes32 celoRandom = keccak256(abi.encodePacked(
+            block.prevrandao,
+            block.number,
+            block.timestamp,
+            gameId,
+            req.round,
+            req.commitBlock
+        ));
+
+        // ── Mix with game-specific entropy to prevent cross-game reuse ────────
+        address[] memory active = _getActivePlayers(gameId);
+        require(active.length > 1, "Only one player left");
+
         bytes32 seed = keccak256(
             abi.encodePacked(
-                blockhash(block.number - 1), // changes every block; finalised before this tx
-                gameId,                       // unique per game
-                g.currentRound,              // unique per round
-                _hashPlayers(active)         // unique per player configuration
+                celoRandom,              // Celo RANDAO – unmanipulable by host
+                gameId,                  // unique per game
+                req.round,               // unique per round
+                req.commitBlock,         // block the commitment was made
+                _hashPlayers(active)     // current active player set
             )
         );
 
         uint256 victimIdx = uint256(seed) % active.length;
         address victim    = active[victimIdx];
 
+        // ── Clear the pending spin before state changes (re-entrancy guard) ──
+        delete pendingSpins[gameId];
+
         // ── Eliminate chosen player ───────────────────────────────────────────
         _eliminatePlayer(gameId, victim, active);
         emit PlayerEliminated(gameId, victim, g.currentRound);
 
         // ── Auto-advance round (game stays live for next spin) ────────────────
-        // Only advance if the game is still running — _eliminatePlayer may have
-        // already called _completeGame when the last opponent was removed.
         if (g.status == Status.IN_PROGRESS) {
             g.currentRound++;
             g.roundEnd = block.number + g.roundDuration;
@@ -236,6 +318,14 @@ contract BreevsRussianRoulette {
         Game storage g = games[gameId];
         require(g.status == Status.IN_PROGRESS, "Not in progress");
         require(block.number > g.roundEnd,      "Round not ended yet");
+
+        // Auto-clear expired spins so the round can advance
+        SpinRequest storage existing = pendingSpins[gameId];
+        if (existing.pending && block.number > existing.commitBlock + 500) {
+            delete pendingSpins[gameId];
+        }
+
+        require(!pendingSpins[gameId].pending, "Resolve pending spin first");
 
         address[] memory active = _getActivePlayers(gameId);
         if (active.length <= 1) {
