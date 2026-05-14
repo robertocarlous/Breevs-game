@@ -1,47 +1,35 @@
 "use client";
-
 import Modal from "@/component/ResuableModal";
-import GlowingEffect from "@/component/GlowingEffectProps";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { celoSepolia } from "wagmi/chains";
-
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useCreateGame } from "@/hooks/useGame";
 import { useGameStore } from "@/store/gameStore";
-import { getGameInfo, MIN_STAKE } from "@/lib/contractCalls";
-import { formatEther } from "viem";
-import {
-  showErrorToast,
-  showSuccessToast,
-  showTransactionToast,
-} from "@/component/Toast";
+import { getGameInfo, STAKE_OPTIONS } from "@/lib/contractCalls";
+import { showErrorToast, showSuccessToast, showTransactionToast } from "@/component/Toast";
 
 interface CreateGameModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-const CreateGameModal: React.FC<CreateGameModalProps> = ({
-  isOpen,
-  onClose,
-}) => {
+const ROUND_DURATION = 900n; // blocks (~30 min on Celo Sepolia L2 at ~2s/block)
+
+const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) => {
   const router = useRouter();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { switchChainAsync, isPending: isSwitching } = useSwitchChain();
   const { openConnectModal } = useConnectModal();
   const { mutateAsync: createGame, isPending } = useCreateGame();
-  const { setCurrentCreatorGame, getCurrentActiveGame, hasActiveGame } =
-    useGameStore();
+  const { setCurrentCreatorGame, getCurrentActiveGame, hasActiveGame } = useGameStore();
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const [selectedStakeIndex, setSelectedStakeIndex] = useState(0);
 
   const isWrongChain = isConnected && chainId !== celoSepolia.id;
-
-  const FIXED_STAKE_CELO = formatEther(MIN_STAKE); // derived from contract constant
-  const MAX_PLAYERS = 6;
-  const ROUND_DURATION = 20n; // blocks (~2 min on Celo Sepolia)
+  const selectedOption = STAKE_OPTIONS[selectedStakeIndex];
 
   const handleSwitchChain = async () => {
     setSwitchError(null);
@@ -74,6 +62,7 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({
     try {
       const { txId, gameId } = await createGame({
         duration: ROUND_DURATION,
+        stake: selectedOption.value,
       });
 
       showTransactionToast(
@@ -90,7 +79,6 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({
       onClose();
       router.push(`/GameScreen/${gameId}`);
     } catch (err: any) {
-      console.error("Create game error:", err);
       const errorMessage = err.message?.includes("rejected")
         ? "Transaction rejected by user"
         : err.message || "Failed to create game. Please try again.";
@@ -100,98 +88,102 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose}>
-      <div className="bg-gradient-to-br from-[#0B1445] via-[#0a1529] to-[#0B1445] text-white p-4 sm:p-6 rounded-2xl border border-red-500/20 max-w-sm w-full mb-[80px]">
-        <GlowingEffect className="top-[63px] left-[47px]" />
+      <div className="bg-[#030B1F] text-white p-5 sm:p-7 rounded-2xl border border-red-500/20 max-w-sm w-full mb-[80px] shadow-2xl shadow-black/60">
 
         {/* Header */}
-        <div className="text-center mb-4">
-          <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-6 w-6 text-red-500"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
+        <div className="text-center mb-5">
+          <div className="w-14 h-14 bg-red-600/20 border border-red-500/30 rounded-full flex items-center justify-center mx-auto mb-3">
+            <span className="text-2xl">🎰</span>
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold mb-1">
-            Create New Game
+          <h2 className="text-xl sm:text-2xl font-bold text-white mb-1 tracking-tight">
+            Create Game Room
           </h2>
-          <p className="text-xs text-gray-400">
-            Start a new Russian Roulette room on Celo
+          <p className="text-xs text-gray-500">
+            Choose your stake. Winner takes the prize pool.
           </p>
         </div>
 
-        {/* Fixed Stake Display */}
-        <div className="mb-4">
-          <label className="block text-xs font-semibold text-[#FF3B3B] mb-2 text-center">
-            Required Stake
-          </label>
-          <div className="bg-gradient-to-r from-gray-800/80 to-gray-900/80 backdrop-blur-sm p-4 rounded-xl border border-gray-700/50 text-center">
-            <p className="text-3xl font-bold text-white">{FIXED_STAKE_CELO}</p>
-            <p className="text-xs text-gray-400 mt-1 font-semibold">CELO</p>
+        {/* Stake Selector */}
+        <div className="mb-5">
+          <p className="text-xs font-semibold text-red-400 uppercase tracking-widest mb-3 text-center">
+            Select Stake Amount
+          </p>
+          <div className="grid grid-cols-5 gap-2">
+            {STAKE_OPTIONS.map((option, index) => {
+              const isSelected = selectedStakeIndex === index;
+              return (
+                <button
+                  key={option.label}
+                  onClick={() => setSelectedStakeIndex(index)}
+                  className={`relative flex flex-col items-center justify-center p-2 sm:p-3 rounded-xl border-2 transition-all duration-200 ${
+                    isSelected
+                      ? "border-red-500 bg-red-600/20 shadow-lg shadow-red-500/30 scale-105"
+                      : "border-white/10 bg-white/5 hover:border-red-500/40 hover:bg-white/10"
+                  }`}
+                >
+                  <span
+                    className={`text-sm sm:text-base font-bold ${
+                      isSelected ? "text-white" : "text-gray-300"
+                    }`}
+                  >
+                    {option.label}
+                  </span>
+                  <span className="text-[9px] text-gray-500 mt-0.5">CELO</span>
+                  {isSelected && (
+                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full shadow-md shadow-red-500/60" />
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Info Text */}
-        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-4">
-          <p className="text-xs text-blue-200 text-center">
-            💡 Each player must stake{" "}
-            <span className="text-[#FF3B3B] font-bold">{FIXED_STAKE_CELO} CELO</span> to join.
-            Winner takes all {Number(FIXED_STAKE_CELO) * MAX_PLAYERS} CELO!
+        {/* Prize Pool Preview */}
+        <div className="mb-5 bg-[#0B1445]/80 border border-amber-500/20 rounded-xl p-4 text-center">
+          <p className="text-xs text-gray-500 mb-1 uppercase tracking-widest">Prize Pool</p>
+          <p className="text-3xl font-bold text-amber-400 drop-shadow-lg">
+            {selectedOption.prize} CELO
           </p>
-        </div>
-
-        {/* Host balance requirement */}
-        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
-          <p className="text-xs text-yellow-200 text-center">
-            ⚠️ Host wallet must hold at least{" "}
-            <span className="text-yellow-300 font-bold">5 CELO</span>
+          <p className="text-[10px] text-gray-500 mt-1">
+            {selectedOption.label} CELO × 6 players
           </p>
         </div>
 
         {/* Wrong Network Warning */}
         {isWrongChain && (
-          <div className="mb-4 p-3 bg-red-900/40 border border-red-500/60 rounded-lg">
+          <div className="mb-4 p-3 bg-red-900/30 border border-red-500/50 rounded-xl">
             <p className="text-xs text-red-300 text-center mb-2">
-              Wrong network detected. This game runs on{" "}
-              <span className="font-bold text-red-200">Celo Sepolia Testnet</span>.
+              Wrong network. Switch to{" "}
+              <span className="font-bold text-white">Celo Sepolia Testnet</span>.
             </p>
             {switchError && (
               <p className="text-xs text-red-400 text-center mb-2">{switchError}</p>
             )}
             <button
-              className="w-full bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1.5 px-3 rounded-lg transition-colors disabled:opacity-50"
+              className="w-full bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 px-3 rounded-lg transition-colors disabled:opacity-50"
               onClick={handleSwitchChain}
               disabled={isSwitching}
             >
-              {isSwitching ? "Switching..." : "Switch to Celo Sepolia Testnet"}
+              {isSwitching ? "Switching..." : "Switch to Celo Sepolia"}
             </button>
           </div>
         )}
 
         {/* Wallet Warning */}
         {!isConnected && (
-          <div className="mb-4 p-2 bg-yellow-900/30 border border-yellow-500/50 rounded-lg">
-            <p className="text-xs text-yellow-300 text-center">
-              Please connect your wallet to proceed
+          <div className="mb-4 p-2 bg-amber-900/20 border border-amber-500/30 rounded-lg">
+            <p className="text-xs text-amber-300 text-center">
+              Connect your wallet to proceed
             </p>
           </div>
         )}
 
-        {/* Action Button */}
+        {/* Create Button */}
         <button
-          className={`w-full bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white font-bold py-2 px-4 rounded-xl transition-all duration-300 shadow-lg hover:shadow-red-500/50 ${
+          className={`w-full bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white font-bold py-3 px-4 rounded-xl transition-all duration-300 shadow-lg shadow-red-600/30 text-sm ${
             isPending || !isConnected || isWrongChain
               ? "opacity-50 cursor-not-allowed"
-              : "hover:scale-105"
+              : "hover:scale-[1.02] hover:shadow-red-500/50"
           }`}
           onClick={handleCreateGame}
           disabled={isPending || isWrongChain}
@@ -211,21 +203,25 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({
                   r="10"
                   stroke="currentColor"
                   strokeWidth="4"
-                ></circle>
+                />
                 <path
                   className="opacity-75"
                   fill="currentColor"
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                ></path>
+                />
               </svg>
-              Creating Game...
+              Creating Room...
             </span>
           ) : isConnected ? (
-            "Create Game Room (0.1 CELO)"
+            `🎰 Create Game Room — ${selectedOption.label} CELO`
           ) : (
             "Connect Wallet"
           )}
         </button>
+
+        <p className="text-center text-[10px] text-gray-600 mt-3">
+          Stake is locked until the game ends. Winner claims the full prize pool.
+        </p>
       </div>
     </Modal>
   );

@@ -1,14 +1,84 @@
 @import "tailwindcss";
 
+/* ─── Typography ──────────────────────────────────────────────── */
 .loading-text {
   -webkit-text-stroke: 0.5px #ff3b3b;
   color: transparent;
   text-shadow: 0 0 5px rgba(255, 0, 0, 0.8), 0 0 15px rgba(255, 0, 0, 0.8);
 }
 
-.custom-connect button{
+/* ─── Wallet connect button ───────────────────────────────────── */
+.custom-connect button {
   border-radius: 50px !important;
-  background-color: #191f57 !important;
+  background-color: #0B1445 !important;
   font-family: "Open Sans", sans-serif !important;
   padding: 0.5rem 3.1rem !important;
+  border: 1px solid rgba(255, 59, 59, 0.2) !important;
 }
+
+/* ─── Red glow pulse ──────────────────────────────────────────── */
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5); }
+  50%       { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0); }
+}
+.glow-red {
+  animation: pulse-red 1.8s ease-in-out infinite;
+  box-shadow: 0 0 16px rgba(220, 38, 38, 0.6), 0 0 32px rgba(220, 38, 38, 0.3);
+}
+
+/* ─── Screen flash on elimination ─────────────────────────────── */
+@keyframes elimination-flash {
+  0%   { opacity: 0; }
+  20%  { opacity: 0.7; }
+  60%  { opacity: 0.5; }
+  100% { opacity: 0; }
+}
+.elimination-flash {
+  animation: elimination-flash 0.8s ease-out forwards;
+}
+
+/* ─── Shake on elimination ────────────────────────────────────── */
+@keyframes shake {
+  0%   { transform: translateX(0); }
+  15%  { transform: translateX(-8px) rotate(-1deg); }
+  30%  { transform: translateX(8px) rotate(1deg); }
+  45%  { transform: translateX(-5px); }
+  60%  { transform: translateX(5px); }
+  75%  { transform: translateX(-2px); }
+  100% { transform: translateX(0); }
+}
+.shake { animation: shake 0.5s ease-out forwards; }
+
+/* ─── Eliminated player pop ───────────────────────────────────── */
+@keyframes float-up {
+  0%   { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-60px) scale(1.3); }
+}
+.float-up { animation: float-up 1.2s ease-out forwards; }
+
+/* ─── Achievement unlock glow ─────────────────────────────────── */
+@keyframes achievement-pop {
+  0%   { transform: scale(0.8); opacity: 0; }
+  60%  { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.achievement-pop { animation: achievement-pop 0.4s ease-out forwards; }
+
+/* ─── Mission progress bar ────────────────────────────────────── */
+@keyframes progress-fill {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+
+/* ─── Ambient chamber glow ────────────────────────────────────── */
+@keyframes chamber-pulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(220, 38, 38, 0.4); }
+  50%       { box-shadow: 0 0 14px rgba(220, 38, 38, 0.8), 0 0 24px rgba(220, 38, 38, 0.3); }
+}
+.chamber-active { animation: chamber-pulse 2s ease-in-out infinite; }
+
+/* ─── Scrollbar ───────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 6px; }
+::-webkit-scrollbar-track { background: #030B1F; }
+::-webkit-scrollbar-thumb { background: rgba(220, 38, 38, 0.4); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(220, 38, 38, 0.7); }

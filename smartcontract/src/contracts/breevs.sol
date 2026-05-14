@@ -25,16 +25,15 @@ pragma solidity ^0.8.0;
  * 7. claimPrize()   – last player standing claims the full prize pool
  */
 contract BreevsRussianRoulette {
-
     // ─── Constants ───────────────────────────────────────────────────────────
 
-    uint256 public constant MAX_PLAYERS             = 6;
-    uint256 public constant MIN_PLAYER_STAKE        = 2e17;    // 0.2 CELO
-    uint256 public constant MAX_PLAYER_STAKE        = 1000e18; // 1000 CELO
-    uint256 public constant HOST_BALANCE_MULTIPLIER = 5;       // host must hold >= 5x stake
-    uint256 public constant MIN_ROUND_DURATION      = 10;      // blocks
-    uint256 public constant MAX_ROUND_DURATION      = 1000;    // blocks
-    uint256 public constant REVEAL_DELAY            = 1;       // blocks to wait before resolving
+    uint256 public constant MAX_PLAYERS = 6;
+    uint256 public constant MIN_PLAYER_STAKE = 2e17; // 0.2 CELO
+    uint256 public constant MAX_PLAYER_STAKE = 1000e18; // 1000 CELO
+    uint256 public constant HOST_BALANCE_MULTIPLIER = 5; // host must hold >= 5x stake
+    uint256 public constant MIN_ROUND_DURATION = 10; // blocks
+    uint256 public constant MAX_ROUND_DURATION = 1000; // blocks
+    uint256 public constant REVEAL_DELAY = 1; // blocks to wait before resolving
 
     // Celo core registry – same address on every Celo network
     address private constant CELO_REGISTRY =
@@ -42,28 +41,32 @@ contract BreevsRussianRoulette {
 
     // ─── Types ───────────────────────────────────────────────────────────────
 
-    enum Status { CREATED, IN_PROGRESS, COMPLETED }
+    enum Status {
+        CREATED,
+        IN_PROGRESS,
+        COMPLETED
+    }
 
     struct Game {
-        address   creator;
+        address creator;
         address[] players;
-        uint256   stake;
-        uint256   prizePool;
-        Status    status;
-        uint256   roundDuration;
-        uint256   roundEnd;
-        uint256   currentRound;
-        address   winner;
-        uint256   totalRounds;
+        uint256 stake;
+        uint256 prizePool;
+        Status status;
+        uint256 roundDuration;
+        uint256 roundEnd;
+        uint256 currentRound;
+        address winner;
+        uint256 totalRounds;
     }
 
     struct PlayerGameData {
-        bool    eliminated;
+        bool eliminated;
         uint256 eliminationRound;
     }
 
     struct SpinRequest {
-        bool    pending;
+        bool pending;
         uint256 commitBlock;
         uint256 round;
     }
@@ -79,24 +82,34 @@ contract BreevsRussianRoulette {
 
     uint256 public gameCounter;
 
-    mapping(uint256 => Game)                                public games;
-    mapping(uint256 => mapping(address => PlayerGameData)) public playerGameData;
-    mapping(uint256 => mapping(address => uint256))        public playerDeposits;
-    mapping(uint256 => bool)                               public prizeClaimed;
-    mapping(address => UserStats)                          public userStats;
-    mapping(uint256 => SpinRequest)                        public pendingSpins;
+    mapping(uint256 => Game) public games;
+    mapping(uint256 => mapping(address => PlayerGameData))
+        public playerGameData;
+    mapping(uint256 => mapping(address => uint256)) public playerDeposits;
+    mapping(uint256 => bool) public prizeClaimed;
+    mapping(address => UserStats) public userStats;
+    mapping(uint256 => SpinRequest) public pendingSpins;
 
     // ─── Events ──────────────────────────────────────────────────────────────
 
     event GameCreated(uint256 indexed gameId);
     event PlayerJoined(uint256 indexed gameId, address player);
     event GameStarted(uint256 indexed gameId);
-    event PlayerEliminated(uint256 indexed gameId, address player, uint256 round);
+    event PlayerEliminated(
+        uint256 indexed gameId,
+        address player,
+        uint256 round
+    );
     event RoundAdvanced(uint256 indexed gameId, uint256 newRound);
     event GameCompleted(uint256 indexed gameId, address winner);
     event PrizeClaimed(uint256 indexed gameId, address winner, uint256 amount);
-    event SpinRequested(uint256 indexed gameId, uint256 commitBlock, uint256 round);
-// ═══════════════════════════════════════════════════════════════════════════
+    event SpinRequested(
+        uint256 indexed gameId,
+        uint256 commitBlock,
+        uint256 round
+    );
+
+    // ═══════════════════════════════════════════════════════════════════════════
     //  GAME MANAGEMENT
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -114,23 +127,28 @@ contract BreevsRussianRoulette {
             "Stake must be between 1 and 1000 CELO"
         );
         require(
-            roundDuration >= MIN_ROUND_DURATION && roundDuration <= MAX_ROUND_DURATION,
+            roundDuration >= MIN_ROUND_DURATION &&
+                roundDuration <= MAX_ROUND_DURATION,
             "Invalid round duration"
         );
-        require(msg.value == playerStake, "Host deposit must equal the player stake");
+        require(
+            msg.value == playerStake,
+            "Host deposit must equal the player stake"
+        );
 
         // msg.value is deducted from balance before this code runs, so add it back
         require(
-            address(msg.sender).balance + msg.value >= HOST_BALANCE_MULTIPLIER * playerStake,
+            address(msg.sender).balance + msg.value >=
+                HOST_BALANCE_MULTIPLIER * playerStake,
             "Host wallet must hold at least 5x the player stake"
         );
 
         gameCounter++;
-        Game storage g  = games[gameCounter];
-        g.creator       = msg.sender;
-        g.stake         = playerStake;
-        g.prizePool     = playerStake;
-        g.status        = Status.CREATED;
+        Game storage g = games[gameCounter];
+        g.creator = msg.sender;
+        g.stake = playerStake;
+        g.prizePool = playerStake;
+        g.status = Status.CREATED;
         g.roundDuration = roundDuration;
 
         g.players.push(msg.sender);
@@ -147,10 +165,10 @@ contract BreevsRussianRoulette {
      */
     function joinGame(uint256 gameId) external payable {
         Game storage g = games[gameId];
-        require(g.status == Status.CREATED,         "Game not joinable");
-        require(g.players.length < MAX_PLAYERS,     "Game is full");
+        require(g.status == Status.CREATED, "Game not joinable");
+        require(g.players.length < MAX_PLAYERS, "Game is full");
         require(!_isUserInGame(gameId, msg.sender), "Already in game");
-        require(msg.value == g.stake,               "Must send exactly the game stake");
+        require(msg.value == g.stake, "Must send exactly the game stake");
 
         g.players.push(msg.sender);
         g.prizePool += g.stake;
@@ -192,14 +210,14 @@ contract BreevsRussianRoulette {
      */
     function startGame(uint256 gameId) external {
         Game storage g = games[gameId];
-        require(g.status == Status.CREATED,      "Game not ready");
-        require(msg.sender == g.creator,         "Only creator can start");
+        require(g.status == Status.CREATED, "Game not ready");
+        require(msg.sender == g.creator, "Only creator can start");
         require(g.players.length == MAX_PLAYERS, "Need exactly 6 players");
 
-        g.status       = Status.IN_PROGRESS;
+        g.status = Status.IN_PROGRESS;
         g.currentRound = 1;
-        g.roundEnd     = block.number + g.roundDuration;
-    emit GameStarted(gameId);
+        g.roundEnd = block.number + g.roundDuration;
+        emit GameStarted(gameId);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -212,9 +230,12 @@ contract BreevsRussianRoulette {
      */
     function spin(uint256 gameId) external {
         Game storage g = games[gameId];
-        require(msg.sender == g.creator,        "Only host can spin");
+        require(msg.sender == g.creator, "Only host can spin");
         require(g.status == Status.IN_PROGRESS, "Game not in progress");
-        require(block.number <= g.roundEnd,     "Round has expired - call advanceRound");
+        require(
+            block.number <= g.roundEnd,
+            "Round has expired - call advanceRound"
+        );
 
         // Auto-clear a spin that expired (> 500 blocks old) so the game doesn't get stuck
         SpinRequest storage existing = pendingSpins[gameId];
@@ -223,9 +244,6 @@ contract BreevsRussianRoulette {
         }
 
         require(!pendingSpins[gameId].pending, "Spin already pending");
-
-        address[] memory active = _getActivePlayers(gameId);
-        require(active.length > 1, "Only one player left");
 
         pendingSpins[gameId] = SpinRequest({
             pending: true,
@@ -262,34 +280,39 @@ contract BreevsRussianRoulette {
         );
 
         // ── Randomness: mix multiple on-chain sources into one seed ──────────
-        bytes32 celoRandom = keccak256(abi.encodePacked(
-            block.prevrandao,
-            block.number,
-            block.timestamp,
-            gameId,
-            req.round,
-            req.commitBlock
-        ));
+        bytes32 celoRandom = keccak256(
+            abi.encodePacked(
+                block.prevrandao,
+                block.number,
+                block.timestamp,
+                gameId,
+                req.round,
+                req.commitBlock
+            )
+        );
 
         // ── Mix with game-specific entropy to prevent cross-game reuse ────────
         address[] memory active = _getActivePlayers(gameId);
         require(active.length > 1, "Only one player left");
 
-        address[] memory eligible = _getActivePlayersExcludingHost(gameId, g.creator);
+        address[] memory eligible = _getActivePlayersExcludingHost(
+            gameId,
+            g.creator
+        );
         require(eligible.length > 0, "No eligible player to eliminate");
 
         bytes32 seed = keccak256(
             abi.encodePacked(
-                celoRandom,              // Celo RANDAO – unmanipulable by host
-                gameId,                  // unique per game
-                req.round,               // unique per round
-                req.commitBlock,         // block the commitment was made
-                _hashPlayers(active)     // current active player set
+                celoRandom, // Celo RANDAO – unmanipulable by host
+                gameId, // unique per game
+                req.round, // unique per round
+                req.commitBlock, // block the commitment was made
+                _hashPlayers(active) // current active player set
             )
         );
 
         uint256 victimIdx = uint256(seed) % eligible.length;
-        address victim    = eligible[victimIdx];
+        address victim = eligible[victimIdx];
 
         // ── Clear the pending spin before state changes (re-entrancy guard) ──
         delete pendingSpins[gameId];
@@ -297,7 +320,8 @@ contract BreevsRussianRoulette {
         // ── Eliminate chosen player ───────────────────────────────────────────
         _eliminatePlayer(gameId, victim, active);
         emit PlayerEliminated(gameId, victim, g.currentRound);
-     // ── Auto-advance round (game stays live for next spin) ────────────────
+
+        // ── Auto-advance round (game stays live for next spin) ────────────────
         if (g.status == Status.IN_PROGRESS) {
             g.currentRound++;
             g.roundEnd = block.number + g.roundDuration;
@@ -317,7 +341,7 @@ contract BreevsRussianRoulette {
     function advanceRound(uint256 gameId) external {
         Game storage g = games[gameId];
         require(g.status == Status.IN_PROGRESS, "Not in progress");
-        require(block.number > g.roundEnd,      "Round not ended yet");
+        require(block.number > g.roundEnd, "Round not ended yet");
 
         // Auto-clear expired spins so the round can advance
         SpinRequest storage existing = pendingSpins[gameId];
@@ -347,9 +371,9 @@ contract BreevsRussianRoulette {
     function claimPrize(uint256 gameId) external {
         Game storage g = games[gameId];
         require(g.status == Status.COMPLETED, "Game not completed");
-        require(g.winner != address(0),       "No winner set");
-        require(msg.sender == g.winner,       "Not the winner");
-        require(!prizeClaimed[gameId],        "Prize already claimed");
+        require(g.winner != address(0), "No winner set");
+        require(msg.sender == g.winner, "Not the winner");
+        require(!prizeClaimed[gameId], "Prize already claimed");
 
         prizeClaimed[gameId] = true;
         _updateUserStatsOnWin(msg.sender, g.prizePool);
@@ -365,7 +389,9 @@ contract BreevsRussianRoulette {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// @notice Returns all active (non-eliminated) players for a game.
-    function getActivePlayers(uint256 gameId) external view returns (address[] memory) {
+    function getActivePlayers(
+        uint256 gameId
+    ) external view returns (address[] memory) {
         return _getActivePlayers(gameId);
     }
 
@@ -378,14 +404,20 @@ contract BreevsRussianRoulette {
     //  INTERNAL HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    function _isUserInGame(uint256 gameId, address user) internal view returns (bool) {
+    function _isUserInGame(
+        uint256 gameId,
+        address user
+    ) internal view returns (bool) {
         address[] storage players = games[gameId].players;
         for (uint256 i = 0; i < players.length; i++) {
             if (players[i] == user) return true;
         }
         return false;
     }
-    function _getActivePlayers(uint256 gameId) internal view returns (address[] memory) {
+
+    function _getActivePlayers(
+        uint256 gameId
+    ) internal view returns (address[] memory) {
         address[] storage all = games[gameId].players;
         uint256 count = 0;
         for (uint256 i = 0; i < all.length; i++) {
@@ -401,7 +433,10 @@ contract BreevsRussianRoulette {
         return active;
     }
 
-    function _getActivePlayersExcludingHost(uint256 gameId, address host) internal view returns (address[] memory) {
+    function _getActivePlayersExcludingHost(
+        uint256 gameId,
+        address host
+    ) internal view returns (address[] memory) {
         address[] memory active = _getActivePlayers(gameId);
         uint256 count = 0;
         for (uint256 i = 0; i < active.length; i++) {
@@ -419,7 +454,9 @@ contract BreevsRussianRoulette {
     }
 
     /// @dev Deterministic hash of the player list — extra entropy per spin.
-    function _hashPlayers(address[] memory players) internal pure returns (bytes32) {
+    function _hashPlayers(
+        address[] memory players
+    ) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(players));
     }
 
@@ -433,8 +470,9 @@ contract BreevsRussianRoulette {
         address player,
         address[] memory activeBefore
     ) internal {
-        playerGameData[gameId][player].eliminated       = true;
-        playerGameData[gameId][player].eliminationRound = games[gameId].currentRound;
+        playerGameData[gameId][player].eliminated = true;
+        playerGameData[gameId][player].eliminationRound = games[gameId]
+            .currentRound;
 
         // Build post-elimination list without re-scanning storage
         uint256 remaining = 0;
@@ -460,9 +498,9 @@ contract BreevsRussianRoulette {
         require(active.length == 1, "Cannot complete: no unique winner");
 
         Game storage g = games[gameId];
-        g.status       = Status.COMPLETED;
-        g.winner       = active[0];
-        g.totalRounds  = g.currentRound;
+        g.status = Status.COMPLETED;
+        g.winner = active[0];
+        g.totalRounds = g.currentRound;
 
         emit GameCompleted(gameId, g.winner);
     }

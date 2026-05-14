@@ -1,7 +1,6 @@
 "use client";
 
 import Modal from "@/component/ResuableModal";
-import GlowingEffect from "@/component/GlowingEffectProps";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAccount } from "wagmi";
@@ -14,7 +13,7 @@ import {
   showSuccessToast,
   showTransactionToast,
 } from "@/component/Toast";
-import { GameStatus } from "@/lib/contractCalls";
+import { GameStatus, MIN_STAKE } from "@/lib/contractCalls";
 import { formatEther } from "viem";
 
 interface StakeModalProps {
@@ -23,11 +22,7 @@ interface StakeModalProps {
   onSuccess?: () => void;
 }
 
-const StakeModal: React.FC<StakeModalProps> = ({
-  isOpen,
-  onClose,
-  onSuccess,
-}) => {
+const StakeModal: React.FC<StakeModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const router = useRouter();
   const { address, isConnected } = useAccount();
   const { openConnectModal } = useConnectModal();
@@ -42,10 +37,11 @@ const StakeModal: React.FC<StakeModalProps> = ({
   } = useGameStore();
   const [txId, setTxId] = useState<string | null>(null);
 
-  const stake = selectedGame?.stake ?? 0n;
+  const stake = selectedGame?.stake ?? MIN_STAKE;
   const gameId = selectedGame?.gameId;
-
-  const stakeInCELO = stake > 0n ? formatEther(stake) : "0";
+  const prizePool = selectedGame?.prizePool ?? 0n;
+  const stakeDisplay = formatEther(stake > 0n ? stake : MIN_STAKE);
+  const prizeDisplay = formatEther(prizePool > 0n ? prizePool : stake > 0n ? stake : MIN_STAKE);
 
   const handleStake = async () => {
     try {
@@ -77,13 +73,10 @@ const StakeModal: React.FC<StakeModalProps> = ({
         return;
       }
 
-      const tx = await joinGameMutation({ gameId });
+      const tx = await joinGameMutation({ gameId, stake: stake > 0n ? stake : MIN_STAKE });
 
       if (selectedGame && address) {
-        addToMyGames({
-          ...selectedGame,
-          players: [...selectedGame.players, address],
-        });
+        addToMyGames({ ...selectedGame, players: [...selectedGame.players, address] });
         setCurrentPlayerGame(selectedGame, address);
       }
 
@@ -104,7 +97,6 @@ const StakeModal: React.FC<StakeModalProps> = ({
         router.push(`/GameScreen/${gameId}`);
       }
     } catch (err: any) {
-      console.error("Stake error:", err);
       const errorMessage = err.message?.includes("rejected")
         ? "Transaction rejected by user"
         : err.message || "Failed to stake";
@@ -114,84 +106,73 @@ const StakeModal: React.FC<StakeModalProps> = ({
   };
 
   useEffect(() => {
-    if (!isOpen) {
-      setTxId(null);
-    }
+    if (!isOpen) setTxId(null);
   }, [isOpen]);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose}>
-      <div className="bg-gradient-to-br from-[#0B1445] via-[#0a1529] to-[#0B1445] text-white p-4 sm:p-6 rounded-2xl border border-red-500/20 max-w-sm w-full mb-[80px]">
-        <GlowingEffect className="top-[63px] left-[47px]" />
-        <div className="text-center mb-4">
-          <div className="w-12 h-12 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-6 w-6 text-green-500"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
+      <div className="bg-[#030B1F] text-white p-5 sm:p-7 rounded-2xl border border-red-500/20 max-w-sm w-full mb-[80px] shadow-2xl shadow-black/60">
+
+        {/* Header */}
+        <div className="text-center mb-5">
+          <div className="w-14 h-14 bg-red-600/20 border border-red-500/30 rounded-full flex items-center justify-center mx-auto mb-3">
+            <span className="text-2xl">🎯</span>
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold mb-1">Join Game</h2>
-          <p className="text-xs text-gray-400">Stake CELO to enter and compete</p>
+          <h2 className="text-xl sm:text-2xl font-bold text-white mb-1 tracking-tight">
+            Join Game
+          </h2>
+          <p className="text-xs text-gray-500">Stake CELO to enter and compete</p>
         </div>
-        <div className="bg-gradient-to-r from-red-500/20 via-purple-500/20 to-red-500/20 border border-red-500/30 rounded-xl p-4 mb-4">
-          <p className="text-xs text-gray-400 mb-2 text-center">
-            Required Stake
+
+        {/* Stake amount */}
+        <div className="bg-gradient-to-r from-red-500/10 to-red-800/10 border border-red-500/30 rounded-xl p-4 mb-4 text-center">
+          <p className="text-[9px] text-gray-500 mb-1 uppercase tracking-widest">Required Stake</p>
+          <p className="text-4xl font-bold text-red-500 drop-shadow-lg">
+            {stakeDisplay}
           </p>
-          <div className="text-center">
-            <p className="text-3xl sm:text-4xl font-bold text-[#FF3B3B] drop-shadow-lg">
-              {stake > 0n ? `${stakeInCELO} CELO` : "Free Entry"}
-            </p>
-          </div>
+          <p className="text-xs text-gray-500 mt-1">CELO</p>
         </div>
+
+        {/* Game info */}
         {selectedGame && (
-          <div className="bg-white/5 backdrop-blur-sm rounded-lg p-3 mb-4 border border-white/10">
+          <div className="bg-[#0B1445]/80 border border-white/10 rounded-xl p-3 mb-4 space-y-2">
             <div className="flex justify-between items-center">
-              <span className="text-xs text-gray-400">Game ID:</span>
-              <span className="text-xs font-bold text-white">
-                #{selectedGame.gameId.toString()}
-              </span>
+              <span className="text-xs text-gray-500">Game ID</span>
+              <span className="text-xs font-bold text-white">#{selectedGame.gameId.toString()}</span>
             </div>
-            <div className="flex justify-between items-center mt-2">
-              <span className="text-xs text-gray-400">Players:</span>
-              <span className="text-xs font-bold text-white">
-                {selectedGame.playerCount}/6
-              </span>
+            <div className="h-px bg-white/5" />
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-gray-500">Players</span>
+              <span className="text-xs font-bold text-white">{selectedGame.playerCount}/6</span>
             </div>
-            <div className="flex justify-between items-center mt-2">
-              <span className="text-xs text-gray-400">Prize Pool:</span>
-              <span className="text-xs font-bold text-[#FF3B3B]">
-                {formatEther(selectedGame.prizePool)} CELO
-              </span>
+            <div className="h-px bg-white/5" />
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-gray-500">Prize Pool</span>
+              <span className="text-xs font-bold text-amber-400">{prizeDisplay} CELO</span>
             </div>
           </div>
         )}
+
         {txId && (
-          <div className="mb-4 p-2 bg-green-900/30 border border-green-500/50 rounded-lg">
+          <div className="mb-4 p-2 bg-green-900/20 border border-green-500/30 rounded-lg">
             <p className="text-xs text-green-300 text-center font-mono break-all">
               TX: {(txId as string).slice(0, 10)}...
             </p>
           </div>
         )}
+
         {!isConnected && (
-          <div className="mb-4 p-2 bg-yellow-900/30 border border-yellow-500/50 rounded-lg">
-            <p className="text-xs text-yellow-300 text-center">
-              Please connect your wallet to proceed
+          <div className="mb-4 p-2 bg-amber-900/20 border border-amber-500/30 rounded-lg">
+            <p className="text-xs text-amber-300 text-center">
+              Connect your wallet to proceed
             </p>
           </div>
         )}
+
+        {/* Action button */}
         <button
-          className={`w-full bg-gradient-to-r from-green-600 to-green-500 hover:from-green-700 hover:to-green-600 text-white font-bold py-2 px-4 rounded-xl transition-all duration-300 shadow-lg hover:shadow-green-500/50 ${
-            isPending || !isConnected ? "opacity-50 cursor-not-allowed" : "hover:scale-105"
+          className={`w-full bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white font-bold py-3 px-4 rounded-xl transition-all duration-300 shadow-lg shadow-red-600/30 text-sm ${
+            isPending || !isConnected ? "opacity-50 cursor-not-allowed" : "hover:scale-[1.02] hover:shadow-red-500/50"
           }`}
           onClick={handleStake}
           disabled={isPending}
@@ -204,14 +185,7 @@ const StakeModal: React.FC<StakeModalProps> = ({
                 fill="none"
                 viewBox="0 0 24 24"
               >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path
                   className="opacity-75"
                   fill="currentColor"
@@ -221,11 +195,15 @@ const StakeModal: React.FC<StakeModalProps> = ({
               Processing...
             </span>
           ) : isConnected ? (
-            "Stake & Join Game"
+            `Stake ${stakeDisplay} CELO & Join`
           ) : (
             "Connect Wallet"
           )}
         </button>
+
+        <p className="text-center text-[10px] text-gray-600 mt-3">
+          Your stake is locked until the game ends.
+        </p>
       </div>
     </Modal>
   );

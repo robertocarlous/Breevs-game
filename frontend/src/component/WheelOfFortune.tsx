@@ -15,8 +15,9 @@ import {
   useClaimPrize,
   useIsPrizeClaimed,
   usePendingSpin,
+  useCancelGame,
 } from "@/hooks/useGame";
-import { GameStatus, getCeloBlockNumber, publicClient, CONTRACT_ADDRESS, BREEVS_ABI } from "@/lib/contractCalls";
+import { GameStatus, getCeloBlockNumber, publicClient, CONTRACT_ADDRESS, BREEVS_ABI, MIN_STAKE } from "@/lib/contractCalls";
 import { formatEther, parseAbiItem } from "viem";
 import BackgroundImgBlur from "@/component/BackgroundBlur";
 import Link from "next/link";
@@ -54,10 +55,12 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastEliminatedPlayer, setLastEliminatedPlayer] = useState<string | null>(null);
-  // eliminatedMap: lowercaseAddr -> round number (populated from on-chain events)
+  const [eliminationFlash, setEliminationFlash] = useState(false);
+  const [shaking, setShaking] = useState(false);
   const [eliminatedMap, setEliminatedMap] = useState<Map<string, number>>(new Map());
-  // stable name + address registry persisted across renders
   const playerInfoRef = useRef(new Map<string, { addr: string; name: string }>());
+  const spinActiveRef = useRef(false);
+  const liveRotationRef = useRef(0);
   const [currentBlockNumber, setCurrentBlockNumber] = useState<number>(0);
   const [showCommentary, setShowCommentary] = useState(false);
   const [commentaryTrigger, setCommentaryTrigger] = useState(0);
@@ -82,6 +85,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
   const { mutateAsync: resolveSpin, isPending: isResolvingTx } = useResolveSpin();
   const { mutateAsync: advanceRound, isPending: isAdvancing } = useAdvanceRound();
   const { mutateAsync: claimPrize, isPending: isClaiming } = useClaimPrize();
+  const { mutateAsync: cancelGame, isPending: isCancelling } = useCancelGame();
   const { data: isPrizeClaimed } = useIsPrizeClaimed(gameId, address || "");
 
   if (!gameId) {
@@ -226,7 +230,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
       } catch {}
     };
     fetch();
-    const iv = setInterval(fetch, 5000); // Celo Sepolia ~5s blocks
+    const iv = setInterval(fetch, 2000); // Celo Sepolia L2 ~2s blocks
     return () => { isMounted = false; clearInterval(iv); };
   }, []);
 
@@ -236,7 +240,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
       setTimeLeft(0); return;
     }
     const blocksRemaining = Math.max(0, Number(game.roundEnd) - currentBlockNumber);
-    setTimeLeft(blocksRemaining * 5); // ~5s per Celo block
+    setTimeLeft(blocksRemaining * 2); // ~2s per block on Celo Sepolia L2
   }, [game?.roundEnd, game?.status, currentBlockNumber]);
 
   // Auto-clear status messages
@@ -347,7 +351,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
       if (address?.toLowerCase() !== game?.creator.toLowerCase()) throw new Error("Only the game creator can spin");
       if (game?.roundEnd && currentBlockNumber > 0 && currentBlockNumber >= Number(game.roundEnd))
         throw new Error("Round has expired. Please advance to the next round.");
-      if (pendingSpin?.pending) throw new Error("A spin is already pending – resolve it first.");
+      if (pendingSpin?.pending && !isSpinExpired()) throw new Error("A spin is already pending – resolve it first.");
 
       showSuccess("🎡 Requesting spin...");
       await requestSpin({ gameId });
@@ -358,41 +362,98 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
     }
   };
 
-  // Two-step spin: resolveSpin
+  // Two-step spin: resolveSpin — spins fast during tx, lands on the eliminated player
   const resolveSpinAction = async () => {
     if (isResolvingTx || isProcessing || winner) return;
-    setError(null); setIsProcessing(true);
+    setError(null);
+    setIsProcessing(true);
+
     try {
       if (!pendingSpin?.pending) throw new Error("No pending spin to resolve");
       if (currentBlockNumber > 0 && currentBlockNumber <= Number(pendingSpin.commitBlock))
         throw new Error("Still waiting for RANDAO reveal – wait 1 more block.");
 
+      // Start fast spin immediately — runs in background while tx processes
       setIsSpinning(true);
-      showSuccess("🎡 Resolving spin...");
+      showSuccess("🎰 Spinning the chamber...");
+      spinActiveRef.current = true;
+      liveRotationRef.current = rotation;
 
+      const fastSpinLoop = async () => {
+        while (spinActiveRef.current) {
+          await new Promise((r) => setTimeout(r, 30));
+          liveRotationRef.current += 20;
+          setRotation(liveRotationRef.current);
+        }
+      };
+      const spinPromise = fastSpinLoop();
+
+      // Fire transaction while wheel spins
       await resolveSpin({ gameId });
 
-      // Animate the wheel
-      const totalSpins = 5 + Math.random() * 3;
-      const finalAngle = 360 * totalSpins;
-      let cur = rotation;
-      const steps = 80;
-      for (let i = 0; i <= steps; i++) {
-        await new Promise((res) => setTimeout(res, 60));
-        const prog = i / steps;
-        cur += (finalAngle / steps) * (1 - prog * 0.7);
-        setRotation(cur);
+      // Stop fast spin
+      spinActiveRef.current = false;
+      await spinPromise;
+
+      // Refresh to get updated players + eliminated address (also set by event watcher)
+      await refreshGameState();
+
+      // ── Calculate landing angle ────────────────────────────────────────
+      // Players occupy 6 fixed slots on the wheel at angles 0°, 60°, 120°...
+      // We want the eliminated player's slot to end up at 0° (the top pointer).
+      const playersSnapshot = [...players];
+      let eliminatedSlotIdx = 0;
+      if (lastEliminatedPlayer) {
+        const idx = playersSnapshot.findIndex(
+          (p) => p.address.toLowerCase() === lastEliminatedPlayer.toLowerCase()
+        );
+        if (idx >= 0) eliminatedSlotIdx = idx;
       }
 
-      await refreshGameState();
+      // Each of the 6 slots is 60° apart on the wheel
+      const slotAngle = eliminatedSlotIdx * 60;
+      // To land this slot at the pointer (top = 0°):
+      // (slotAngle + wheelRotation) mod 360 = 0
+      // wheelRotation mod 360 = (360 - slotAngle) mod 360
+      const targetMod = (360 - slotAngle) % 360;
+      const currentMod = liveRotationRef.current % 360;
+      let extra = targetMod - currentMod;
+      if (extra <= 0) extra += 360;
+
+      // Add 2 full spins for drama + settle
+      const fromRot = liveRotationRef.current;
+      const toRot = fromRot + extra + 720;
+
+      // Decelerate smoothly (ease-out cubic)
+      const steps = 70;
+      for (let i = 0; i <= steps; i++) {
+        await new Promise((r) => setTimeout(r, 35));
+        const t = i / steps;
+        const eased = 1 - Math.pow(1 - t, 3);
+        setRotation(fromRot + (toRot - fromRot) * eased);
+      }
+
+      // ── Impact effects ─────────────────────────────────────────────────
+      setEliminationFlash(true);
+      setShaking(true);
+      setTimeout(() => setEliminationFlash(false), 900);
+      setTimeout(() => setShaking(false), 600);
+
       setIsSpinning(false);
       setIsProcessing(false);
+
+      const eliminatedName = lastEliminatedPlayer
+        ? (players.find((p) => p.address.toLowerCase() === lastEliminatedPlayer.toLowerCase())?.name
+            ?? `${lastEliminatedPlayer.slice(0, 6)}...${lastEliminatedPlayer.slice(-4)}`)
+        : "A player";
+      showSuccess(`💥 ${eliminatedName} has been eliminated!`);
       setShowCommentary(true);
       setCommentaryTrigger((n) => n + 1);
-      showSuccess("❌ Player eliminated!");
     } catch (err: any) {
+      spinActiveRef.current = false;
       showError(err.message || "Failed to resolve spin");
       setIsSpinning(false);
+      setIsProcessing(false);
     }
   };
 
@@ -439,6 +500,20 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
     }
   };
 
+  const cancelGameAction = async () => {
+    if (isProcessing || isCancelling) return;
+    if (!confirm("Cancel this game? All players will be refunded.")) return;
+    setError(null); setIsProcessing(true);
+    try {
+      await cancelGame({ gameId });
+      await refreshGameState();
+      showSuccess("Game cancelled — all players refunded.");
+      setIsProcessing(false);
+    } catch (err: any) {
+      showError(err.message || "Failed to cancel game");
+    }
+  };
+
   const handleJoinGame = () => {
     if (game) { setSelectedGame(game); setIsStakeModalOpen(true); }
   };
@@ -463,18 +538,24 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
     address.toLowerCase() === game.creator.toLowerCase() &&
     !isProcessing && !isStarting;
 
+  const isSpinExpired = () =>
+    !!pendingSpin?.pending &&
+    currentBlockNumber > 0 &&
+    currentBlockNumber > Number(pendingSpin.commitBlock) + 500;
+
   const canRequestSpin = () =>
     game?.status === GameStatus.InProgress &&
     game?.playerCount > 1 &&
     isConnected &&
     address?.toLowerCase() === game?.creator.toLowerCase() &&
-    !pendingSpin?.pending &&
+    (!pendingSpin?.pending || isSpinExpired()) &&
     !isSpinning && !isRequestingTx && !isProcessing &&
     (currentBlockNumber === 0 || currentBlockNumber <= Number(game?.roundEnd));
 
   const canResolveSpin = () =>
     game?.status === GameStatus.InProgress &&
     !!pendingSpin?.pending &&
+    !isSpinExpired() &&
     isConnected &&
     (currentBlockNumber === 0 || currentBlockNumber > Number(pendingSpin?.commitBlock));
 
@@ -568,7 +649,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                 initial={{ opacity: 0, x: 30 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.5 }}
-                className="bg-gradient-to-r from-purple-900/40 to-red-900/40 backdrop-blur-sm rounded-lg px-3 py-2 border border-red-500/30"
+                className="bg-gradient-to-r from-red-900/40 to-red-800/40 backdrop-blur-sm rounded-lg px-3 py-2 border border-red-500/30"
               >
                 <p className="text-xs text-gray-400">Latest Winner</p>
                 <div className="flex flex-wrap items-center gap-1 text-xs">
@@ -655,23 +736,30 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                   </div>
 
                   {isGameCreator && (
-                    <div className="mb-3 p-2 bg-purple-500/10 border border-purple-500/30 rounded-lg">
-                      <p className="text-xs text-purple-300 font-semibold">🎮 You are the Game Host</p>
+                    <div className="mb-3 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                      <p className="text-xs text-amber-300 font-semibold">🎮 You are the Game Host</p>
                     </div>
                   )}
 
                   {/* Pending spin indicator */}
                   {pendingSpin?.pending && (
                     <>
+                      {/* Spin expired — show re-request prompt */}
+                      {isSpinExpired() && (
+                        <div className="mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-center">
+                          <p className="text-xs text-red-300 font-semibold">⚠️ Spin expired (200 blocks passed)</p>
+                          <p className="text-[10px] text-gray-400 mt-1">Click Request Spin below to try again</p>
+                        </div>
+                      )}
                       {/* Waiting for 1 block */}
-                      {currentBlockNumber > 0 && currentBlockNumber <= Number(pendingSpin.commitBlock) && (
+                      {!isSpinExpired() && currentBlockNumber > 0 && currentBlockNumber <= Number(pendingSpin.commitBlock) && (
                         <div className="mb-3 p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg text-center">
                           <p className="text-xs text-orange-300 font-semibold">⌛ Waiting for RANDAO reveal…</p>
-                          <p className="text-[10px] text-gray-400 mt-1">1 more block (~5 sec)</p>
+                          <p className="text-[10px] text-gray-400 mt-1">1 more block (~2 sec)</p>
                         </div>
                       )}
                       {/* Ready to resolve — big pulsing button */}
-                      {(currentBlockNumber === 0 || currentBlockNumber > Number(pendingSpin.commitBlock)) && (
+                      {!isSpinExpired() && (currentBlockNumber === 0 || currentBlockNumber > Number(pendingSpin.commitBlock)) && (
                         <button
                           onClick={resolveSpinAction}
                           disabled={isResolvingTx || isProcessing}
@@ -684,12 +772,12 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                   )}
 
                   {game?.status === GameStatus.InProgress && game.roundEnd && (
-                    <div className="mb-3 p-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                    <div className="mb-3 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
                       <p className="text-xs text-gray-400">Round Time Left</p>
-                      <p className={`text-xl font-bold ${timeLeft <= 60 && timeLeft > 0 ? "text-red-400 animate-pulse" : "text-blue-400"}`}>
+                      <p className={`text-xl font-bold ${timeLeft <= 60 && timeLeft > 0 ? "text-red-400 animate-pulse" : "text-amber-400"}`}>
                         {timeLeft > 0 ? `${Math.floor(timeLeft / 60)}m ${timeLeft % 60}s` : "Expired"}
                       </p>
-                      {timeLeft === 0 && <p className="text-xs text-yellow-300 mt-1">⏰ Round expired – Advance!</p>}
+                      {timeLeft === 0 && <p className="text-xs text-amber-300 mt-1">⏰ Round expired – Advance!</p>}
                     </div>
                   )}
 
@@ -698,14 +786,14 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                       <div className="bg-white/5 rounded-lg p-2 border border-white/10">
                         <p className="text-xs text-gray-400">Stake</p>
                         <p className="text-sm font-bold text-white">
-                          {(Number(game.stake) / 1e18).toFixed(2)} CELO
+                          {formatEther(game.stake > 0n ? game.stake : MIN_STAKE)} CELO
                         </p>
                       </div>
                       <div className="bg-white/5 rounded-lg p-2 border border-white/10">
                         <p className="text-xs text-gray-400">Players</p>
                         <p className="text-sm font-bold text-white">{game.playerCount}/6</p>
                       </div>
-                      <div className="col-span-2 bg-gradient-to-r from-[#FF3B3B]/20 to-purple-500/20 rounded-lg p-2 border border-[#FF3B3B]/30">
+                      <div className="col-span-2 bg-gradient-to-r from-[#FF3B3B]/20 to-red-800/20 rounded-lg p-2 border border-[#FF3B3B]/30">
                         <p className="text-xs text-gray-400">Prize Pool</p>
                         <p className="text-lg sm:text-xl font-bold text-[#FF3B3B]">
                           {formatEther(game.prizePool)} CELO
@@ -722,15 +810,15 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
 
                   {/* Non-creator player info */}
                   {isConnected && !isCreator && game?.status === GameStatus.Active && game.playerCount === 6 && (
-                    <div className="mb-3 p-3 bg-blue-900/30 border border-blue-500/40 rounded-lg">
-                      <p className="text-xs text-blue-200 text-center">
+                    <div className="mb-3 p-3 bg-amber-900/20 border border-amber-500/30 rounded-lg">
+                      <p className="text-xs text-amber-200 text-center">
                         ⏳ Waiting for the <span className="font-bold text-white">Host</span> to start the game.
                       </p>
                     </div>
                   )}
                   {isConnected && !isCreator && game?.status === GameStatus.InProgress && (
-                    <div className="mb-3 p-3 bg-purple-900/30 border border-purple-500/40 rounded-lg">
-                      <p className="text-xs text-purple-200 text-center">
+                    <div className="mb-3 p-3 bg-amber-900/20 border border-amber-500/30 rounded-lg">
+                      <p className="text-xs text-amber-200 text-center">
                         🎡 The <span className="font-bold text-white">Host</span> controls the spin.<br/>
                         Watch the wheel — you could be eliminated!
                       </p>
@@ -743,7 +831,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                         onClick={handleJoinGame}
                         className="block w-full bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white font-bold py-2 px-4 rounded-lg text-center transition-all text-sm shadow-lg"
                       >
-                        🎯 Join Game (1 CELO)
+                        🎯 Join Game ({formatEther(game?.stake && game.stake > 0n ? game.stake : MIN_STAKE)} CELO)
                       </button>
                     )}
                     {canStartGame() && (
@@ -755,11 +843,20 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                         {isStarting || isProcessing ? "Starting..." : "🎮 Start Game"}
                       </button>
                     )}
+                    {(game?.status === GameStatus.Active || game?.status === GameStatus.InProgress) && isCreator && (
+                      <button
+                        onClick={cancelGameAction}
+                        disabled={isCancelling || isProcessing}
+                        className={`w-full bg-gradient-to-r from-gray-700 to-gray-600 hover:from-gray-600 hover:to-gray-500 text-red-300 font-bold py-2 px-4 rounded-lg transition-all text-sm border border-red-500/30 ${isCancelling || isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
+                      >
+                        {isCancelling || isProcessing ? "Cancelling..." : "✕ Cancel & Refund All"}
+                      </button>
+                    )}
                     {canRequestSpin() && (
                       <button
                         onClick={requestSpinAction}
                         disabled={isRequestingTx || isProcessing}
-                        className={`w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm shadow-lg ${isRequestingTx || isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
+                        className={`w-full bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm shadow-lg ${isRequestingTx || isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
                       >
                         {isRequestingTx || isProcessing ? "Requesting..." : "🎡 Request Spin"}
                       </button>
@@ -768,7 +865,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                       <button
                         onClick={resolveSpinAction}
                         disabled={isResolvingTx || isProcessing}
-                        className={`w-full bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-700 hover:to-purple-600 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm shadow-lg ${isResolvingTx || isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
+                        className={`w-full bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm shadow-lg ${isResolvingTx || isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
                       >
                         {isResolvingTx || isProcessing ? "Resolving..." : "🎯 Resolve Spin"}
                       </button>
@@ -801,7 +898,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                     {game?.status === GameStatus.InProgress && !showCommentary && (
                       <button
                         onClick={() => { setShowCommentary(true); setCommentaryTrigger((n) => n + 1); }}
-                        className="w-full bg-gradient-to-r from-red-900/60 to-violet-900/60 hover:brightness-110 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm border border-red-500/30 flex items-center justify-center gap-2"
+                        className="w-full bg-gradient-to-r from-red-900/60 to-red-800/60 hover:brightness-110 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm border border-red-500/30 flex items-center justify-center gap-2"
                       >
                         🎰 Russian Roulette AI
                       </button>
@@ -809,90 +906,133 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                   </div>
 
                   {isProcessing && (
-                    <div className="mt-3 p-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                    <div className="mt-3 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
                       <div className="flex items-center justify-center gap-2">
-                        <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-                        <p className="text-xs text-blue-300">Processing transaction...</p>
+                        <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin"></div>
+                        <p className="text-xs text-amber-300">Processing transaction...</p>
                       </div>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Centre – Wheel */}
+              {/* Centre – Revolver Cylinder */}
               <div className="lg:col-span-4 xl:col-span-5 flex items-center justify-center">
-                <div className="relative w-full max-w-sm aspect-square sticky top-4">
+                <div className={`relative w-full max-w-xs sm:max-w-sm aspect-square sticky top-4 ${shaking ? "shake" : ""}`}>
+
+                  {/* Full-screen elimination flash overlay */}
+                  <AnimatePresence>
+                    {eliminationFlash && (
+                      <motion.div
+                        key="flash"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 0.65 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.25 }}
+                        className="fixed inset-0 bg-red-600 z-[999] pointer-events-none"
+                      />
+                    )}
+                  </AnimatePresence>
+
+                  {/* Outer decorative rings */}
+                  <div className="absolute inset-0 rounded-full border-2 border-red-500/30 shadow-[0_0_40px_rgba(220,38,38,0.15)]" />
+                  <div className="absolute inset-[6px] rounded-full border border-red-500/10" />
+
+                  {/* Spinning cylinder */}
                   <motion.div
-                    className={`w-full h-full rounded-full border-8 border-red-500 flex items-center justify-center shadow-2xl ${isSpinning || isRequestingTx || isProcessing ? "pointer-events-none" : ""}`}
+                    className="absolute inset-[10px] rounded-full"
                     animate={{ rotate: rotation }}
-                    transition={{ ease: "linear", duration: 0.1 }}
+                    transition={{ ease: "linear", duration: 0.04 }}
                     style={{
-                      filter: isSpinning ? "blur(2px)" : "none",
-                      background: "radial-gradient(circle, rgba(255,59,59,0.1) 0%, rgba(3,11,31,0.9) 70%)",
+                      background: "radial-gradient(circle, rgba(220,38,38,0.08) 0%, rgba(3,11,31,0.96) 65%)",
                     }}
                   >
+                    {/* 6 fixed bullet chamber slots */}
+                    {Array.from({ length: 6 }).map((_, slotIdx) => {
+                      const angle = slotIdx * 60;
+                      const player = players[slotIdx] ?? null;
+                      const isElim = player?.status === "Eliminated";
+                      const isJustElim = eliminationFlash && player?.address.toLowerCase() === lastEliminatedPlayer?.toLowerCase();
+
+                      return (
+                        <div
+                          key={slotIdx}
+                          className="absolute"
+                          style={{
+                            width: 60, height: 60,
+                            left: "50%", top: "50%",
+                            transform: `rotate(${angle}deg) translateY(-105px) rotate(-${angle}deg) translate(-50%, -50%)`,
+                          }}
+                        >
+                          {/* Chamber shell */}
+                          <div className={`w-full h-full rounded-full flex items-center justify-center text-xs font-bold border-2 shadow-lg transition-all duration-300 ${
+                            !player
+                              ? "border-white/5 bg-white/5 text-gray-700"
+                              : isJustElim
+                              ? "border-red-400 bg-red-600 text-white scale-125 shadow-[0_0_24px_rgba(220,38,38,0.9)]"
+                              : isElim
+                              ? "border-gray-700/30 bg-gray-900/60 text-gray-600 opacity-40 scale-90"
+                              : "border-red-500/70 bg-gradient-to-br from-red-900/70 to-[#030B1F] text-white chamber-active"
+                          }`}>
+                            {!player ? (
+                              <span className="text-gray-700 text-lg">○</span>
+                            ) : isElim ? (
+                              <span className="text-lg">💀</span>
+                            ) : (
+                              <span className="text-[10px] text-center leading-tight px-0.5">
+                                {player.name.replace("Player ", "P")}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </motion.div>
+
+                  {/* Fixed pointer arrow at top */}
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-2 z-30">
+                    <div className="w-0 h-0 border-l-[13px] border-r-[13px] border-l-transparent border-r-transparent border-t-[26px] border-t-red-500 drop-shadow-[0_0_10px_rgba(239,68,68,0.9)]" />
+                  </div>
+
+                  {/* Centre action button */}
+                  <div className="absolute inset-0 flex items-center justify-center z-20">
                     <div
-                      className={`absolute w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center font-bold text-base sm:text-lg shadow-2xl z-10 cursor-pointer transition-all ${
+                      className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center font-bold text-sm sm:text-base shadow-2xl cursor-pointer transition-all border-2 select-none ${
                         canRequestSpin()
-                          ? "bg-white text-black hover:bg-gray-200 hover:scale-110"
+                          ? "bg-red-600 border-red-400 text-white hover:scale-110 glow-red"
                           : canResolveSpin()
-                          ? "bg-green-400 text-black hover:bg-green-300 hover:scale-110"
+                          ? "bg-green-500 border-green-300 text-black hover:scale-110 hover:bg-green-400"
                           : canStartGame()
-                          ? "bg-yellow-400 text-black hover:bg-yellow-300 hover:scale-110"
-                          : "bg-gray-600 text-gray-400 cursor-not-allowed"
+                          ? "bg-amber-500 border-amber-300 text-black hover:scale-110 hover:bg-amber-400"
+                          : "bg-[#0B1445] border-white/10 text-gray-500 cursor-not-allowed"
                       }`}
                       onClick={
                         canResolveSpin() ? resolveSpinAction
-                        : canRequestSpin() ? requestSpinAction
-                        : canStartGame() ? startGameAction
-                        : undefined
+                          : canRequestSpin() ? requestSpinAction
+                          : canStartGame() ? startGameAction
+                          : undefined
                       }
                     >
                       {isSpinning || isResolvingTx || isProcessing || isStarting
-                        ? "..."
-                        : canResolveSpin()
-                        ? "GO!"
-                        : canRequestSpin()
-                        ? "SPIN"
-                        : canStartGame()
-                        ? "START"
-                        : game?.status === GameStatus.InProgress && !isCreator
-                        ? "LIVE"
-                        : game?.status === GameStatus.Active && !isCreator
-                        ? "WAIT"
+                        ? <span className="animate-spin text-xl">⚙️</span>
+                        : canResolveSpin() ? "GO!"
+                        : isSpinExpired() ? "RETRY"
+                        : canRequestSpin() ? "SPIN"
+                        : canStartGame() ? "START"
+                        : game?.status === GameStatus.InProgress && !isCreator ? "LIVE"
+                        : game?.status === GameStatus.Active && !isCreator ? "WAIT"
                         : "SPIN"}
                     </div>
-                    <div className="absolute w-full h-full flex flex-col items-center justify-center">
-                      {players
-                        .filter((p) => p.status === "Still in")
-                        .map((player, index) => {
-                          const remaining = players.filter((p) => p.status === "Still in").length;
-                          const angle = index * (360 / remaining);
-                          return (
-                            <div
-                              key={index}
-                              className={`absolute w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center rounded-full font-semibold text-xs shadow-lg border-2 transition-all ${
-                                lastEliminatedPlayer === player.address
-                                  ? "bg-gradient-to-br from-gray-500 to-gray-700 text-white border-red-500/50 opacity-50"
-                                  : "bg-gradient-to-br from-red-500 to-red-700 text-white border-white/30"
-                              }`}
-                              style={{ transform: `rotate(${angle}deg) translateY(-95px) rotate(-${angle}deg)` }}
-                            >
-                              {player.name}
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </motion.div>
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-2 z-20">
-                    <div className="w-0 h-0 border-l-[14px] border-r-[14px] border-l-transparent border-r-transparent border-t-[28px] border-t-white drop-shadow-lg"></div>
                   </div>
+
+                  {/* Round indicator below */}
                   {game?.status === GameStatus.InProgress && (
-                    <div className="absolute -bottom-16 left-0 right-0 text-center">
-                      <p className="text-sm text-gray-400">Current Round</p>
-                      <p className="text-2xl font-bold text-white">{game.currentRound}</p>
+                    <div className="absolute -bottom-12 left-0 right-0 text-center">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-widest">Round</p>
+                      <p className="text-3xl font-bold text-white">{game.currentRound}</p>
                     </div>
                   )}
+
                 </div>
               </div>
 
@@ -929,7 +1069,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                               <p className="text-xs text-red-400 mt-1">❌ Round {player.eliminatedInRound}</p>
                             )}
                             {address?.toLowerCase() === player.address.toLowerCase() && (
-                              <p className="text-xs text-blue-300 mt-1">🫵 You</p>
+                              <p className="text-xs text-amber-300 mt-1">🫵 You</p>
                             )}
                           </div>
                           <span className={`text-xs px-2 py-1 rounded-full font-semibold whitespace-nowrap ${
@@ -962,8 +1102,8 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                   )}
 
                   {game?.status === GameStatus.Active && isGameCreator && (
-                    <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                      <p className="text-xs text-blue-300">
+                    <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                      <p className="text-xs text-amber-300">
                         ℹ️ Waiting for 6 players. Once full, start the game!
                       </p>
                     </div>

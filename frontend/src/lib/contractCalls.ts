@@ -13,13 +13,22 @@ export const CONTRACT_ADDRESS = (
 
 export const CONTRACT_NAME = process.env.NEXT_PUBLIC_CONTRACT_NAME || "BreevsRussianRoulette";
 
-export const MIN_STAKE = parseEther("1"); // 1 CELO — must match contract MIN_STAKE constant
+export const MIN_STAKE = parseEther("0.2"); // 0.2 CELO — must match contract MIN_STAKE constant
+export const MAX_STAKE = parseEther("5"); // 5 CELO — must match contract MAX_STAKE constant
+
+export const STAKE_OPTIONS = [
+  { label: "0.2", value: parseEther("0.2"), prize: "1.2" },
+  { label: "0.5", value: parseEther("0.5"), prize: "3" },
+  { label: "1", value: parseEther("1"), prize: "6" },
+  { label: "2", value: parseEther("2"), prize: "12" },
+  { label: "5", value: parseEther("5"), prize: "30" },
+] as const;
 
 // ─── Public client for reads ─────────────────────────────────────────────────
 
 const sepoliaTransports = [
+  "https://forno.celo-sepolia.celo-testnet.org", // official Celo Sepolia forno — primary
   process.env.NEXT_PUBLIC_CELO_RPC_URL,
-  "https://rpc.ankr.com/celo_sepolia", // ✅ replace drpc.org
 ]
   .filter(Boolean)
   .map((url) => http(url as string));
@@ -237,24 +246,33 @@ export async function getAllGameIds(): Promise<bigint[]> {
 // These are used in useGame.ts via wagmi's useWriteContract hook.
 // The function bodies below are helper wrappers for non-hook contexts.
 
-export function createGameArgs(roundDuration: bigint) {
+export function createGameArgs(roundDuration: bigint, stake: bigint = MIN_STAKE) {
   return {
     address: CONTRACT_ADDRESS,
     abi: BREEVS_ABI,
     functionName: "createGame" as const,
-    args: [MIN_STAKE, roundDuration] as const,
-    value: MIN_STAKE,
+    args: [stake, roundDuration] as const,
+    value: stake,
     chain: celoSepolia,
   };
 }
 
-export function joinGameArgs(gameId: bigint) {
+export function cancelGameArgs(gameId: bigint) {
+  return {
+    address: CONTRACT_ADDRESS,
+    abi: BREEVS_ABI,
+    functionName: "cancelGame" as const,
+    args: [gameId] as const,
+  };
+}
+
+export function joinGameArgs(gameId: bigint, stake: bigint = MIN_STAKE) {
   return {
     address: CONTRACT_ADDRESS,
     abi: BREEVS_ABI,
     functionName: "joinGame" as const,
     args: [gameId] as const,
-    value: MIN_STAKE,
+    value: stake,
   };
 }
 
@@ -314,6 +332,7 @@ export function mapContractError(error: unknown): { message: string } {
   if (error instanceof Error) {
     const msg = error.message;
     if (msg.includes("Stake must be exactly 1 CELO")) return { message: "Stake must be exactly 1 CELO" };
+    if (msg.includes("Must send exactly 1 CELO")) return { message: "Must send exactly 1 CELO as stake" };
     if (msg.includes("Game not joinable")) return { message: "This game is not open for joining" };
     if (msg.includes("Game is full")) return { message: "Game is full (6 players max)" };
     if (msg.includes("Already in game")) return { message: "You are already in this game" };
@@ -325,7 +344,7 @@ export function mapContractError(error: unknown): { message: string } {
     if (msg.includes("No pending spin")) return { message: "No pending spin to resolve" };
     if (msg.includes("User rejected")) return { message: "Transaction rejected by user" };
     if (msg.includes("user rejected")) return { message: "Transaction rejected by user" };
-    if (msg.includes("Host must hold at least 5 CELO")) return { message: "Host wallet must hold at least 5 CELO" };
+    if (msg.includes("Invalid duration")) return { message: "Invalid round duration" };
     return { message: msg };
   }
   return { message: String(error) };

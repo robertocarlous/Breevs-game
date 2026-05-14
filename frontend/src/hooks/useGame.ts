@@ -21,6 +21,7 @@ import {
   isGameCreator,
   getPendingSpin,
   createGameArgs,
+  cancelGameArgs,
   joinGameArgs,
   startGameArgs,
   requestSpinArgs,
@@ -249,6 +250,7 @@ function useContractWrite() {
   const { writeContractAsync: _write } = useWriteContract();
   const { switchChainAsync } = useSwitchChain();
   const chainId = useChainId();
+  const { address } = useAccount();
   const qc = useQueryClient();
 
   const invalidate = () => {
@@ -266,9 +268,9 @@ function useContractWrite() {
     const hash = await _write(args);
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status === "reverted") {
-      // Simulate with the same args to extract the revert reason
+      // Simulate with the same args (including account) to extract the revert reason
       try {
-        await publicClient.simulateContract(args);
+        await publicClient.simulateContract({ ...args, account: address });
       } catch (simErr: any) {
         throw simErr;
       }
@@ -285,11 +287,11 @@ export function useCreateGame() {
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const mutateAsync = async ({ duration }: { duration: bigint }) => {
+  const mutateAsync = async ({ duration, stake }: { duration: bigint; stake: bigint }) => {
     setIsPending(true);
     setError(null);
     try {
-      const hash = await writeContractAsync(createGameArgs(duration));
+      const hash = await writeContractAsync(createGameArgs(duration, stake));
       const receipt = await publicClient.getTransactionReceipt({ hash });
       const logs = parseEventLogs({ abi: BREEVS_ABI, logs: receipt.logs, eventName: "GameCreated" });
       const gameId = logs[0]?.args.gameId ?? await getTotalGames();
@@ -313,11 +315,11 @@ export function useJoinGame() {
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const mutateAsync = async ({ gameId }: { gameId: bigint }) => {
+  const mutateAsync = async ({ gameId, stake }: { gameId: bigint; stake?: bigint }) => {
     setIsPending(true);
     setError(null);
     try {
-      const hash = await writeContractAsync(joinGameArgs(gameId));
+      const hash = await writeContractAsync(joinGameArgs(gameId, stake));
       invalidate();
       return { txId: hash };
     } catch (err: any) {
@@ -450,6 +452,31 @@ export function useClaimPrize() {
       const hash = await writeContractAsync(claimPrizeArgs(gameId));
       invalidate();
       qc.invalidateQueries({ queryKey: ["isPrizeClaimed", gameId.toString()] });
+      return { txId: hash };
+    } catch (err: any) {
+      const mapped = mapContractError(err);
+      const e = new Error(mapped.message);
+      setError(e);
+      throw e;
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  return { mutateAsync, isPending, error };
+}
+
+export function useCancelGame() {
+  const { writeContractAsync, invalidate } = useContractWrite();
+  const [isPending, setIsPending] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const mutateAsync = async ({ gameId }: { gameId: bigint }) => {
+    setIsPending(true);
+    setError(null);
+    try {
+      const hash = await writeContractAsync(cancelGameArgs(gameId));
+      invalidate();
       return { txId: hash };
     } catch (err: any) {
       const mapped = mapContractError(err);

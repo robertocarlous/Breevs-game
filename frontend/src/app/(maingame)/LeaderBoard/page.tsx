@@ -1,11 +1,11 @@
 "use client";
 
-import Image from "next/image";
 import React, { useEffect, useState } from "react";
 import BackgroundImgBlur from "@/component/BackgroundBlur";
 import { motion, AnimatePresence } from "framer-motion";
 import { getUserStats, getAllGameIds, getGameInfo } from "@/lib/contractCalls";
 import { Open_Sans } from "next/font/google";
+import { formatEther } from "viem";
 
 const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "700"] });
 
@@ -101,9 +101,8 @@ const PlayersList: React.FC = () => {
     return "text-white";
   };
 
-  const formatSTX = (amount: bigint) => {
-    const stx = Number(amount) / 1_000_000;
-    return stx.toFixed(2);
+  const formatCelo = (amount: bigint) => {
+    return parseFloat(formatEther(amount)).toFixed(2);
   };
 
   if (isLoading) {
@@ -264,21 +263,10 @@ const PlayersList: React.FC = () => {
                       </div>
 
                       {/* Player Avatar */}
-                      <div className="flex-shrink-0 hidden sm:block">
-                        <div className="w-14 h-14 rounded-full border-2 border-red-500/30 bg-gradient-to-br from-red-500/20 to-purple-500/20 flex items-center justify-center overflow-hidden">
-                          <Image
-                            src={player.image || "/images/placeholder.jpg"}
-                            alt={player.address}
-                            className="w-full h-full object-cover"
-                            width={56}
-                            height={56}
-                            unoptimized
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src =
-                                "/images/placeholder.jpg";
-                            }}
-                          />
-                        </div>
+                      <div className="flex-shrink-0 hidden sm:flex w-12 h-12 rounded-full border-2 border-red-500/30 bg-gradient-to-br from-red-900/60 to-[#030B1F] items-center justify-center">
+                        <span className="text-lg font-bold text-red-400">
+                          {player.address.slice(2, 4).toUpperCase()}
+                        </span>
                       </div>
 
                       {/* Player Info */}
@@ -292,7 +280,7 @@ const PlayersList: React.FC = () => {
                             {player.winPercentage.toFixed(1)}% Win Rate
                           </span>
                           <span className="text-xs text-gray-400">
-                            {formatSTX(player.totalWinnings)} STX won
+                            {formatCelo(player.totalWinnings)} CELO won
                           </span>
                         </div>
                       </div>

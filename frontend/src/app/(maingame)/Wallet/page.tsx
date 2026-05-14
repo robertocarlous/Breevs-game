@@ -18,9 +18,8 @@ const Wallet: React.FC = () => {
       >
         <span className="text-lg font-bold text-start">Play & Win Rewards</span>
         <p className="text-sm leading-relaxed">
-          Enter the Breevs arena — a high-stakes elimination game where players
-          risk and win tokens through luck and strategy. Connect your Stacks
-          wallet to join or host a match on the testnet.
+          Enter the Breevs arena — a high-stakes Russian Roulette elimination game on Celo.
+          Six players stake CELO, one survives, winner takes all. Connect your wallet and join a match on Celo Sepolia testnet.
         </p>
       </div>
 
