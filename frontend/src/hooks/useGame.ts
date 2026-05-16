@@ -6,7 +6,7 @@ import {
   UseQueryResult,
 } from "@tanstack/react-query";
 import { useWriteContract, useAccount, useSwitchChain, useChainId } from "wagmi";
-import { celoSepolia } from "wagmi/chains";
+import { celo } from "wagmi/chains";
 import { parseEventLogs } from "viem";
 import { useState } from "react";
 import {
@@ -262,8 +262,8 @@ function useContractWrite() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const writeContractAsync = async (args: any) => {
-    if (chainId !== celoSepolia.id) {
-      await switchChainAsync({ chainId: celoSepolia.id });
+    if (chainId !== celo.id) {
+      await switchChainAsync({ chainId: celo.id });
     }
     const hash = await _write(args);
     const receipt = await publicClient.waitForTransactionReceipt({ hash });

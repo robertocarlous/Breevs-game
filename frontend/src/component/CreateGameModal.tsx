@@ -3,7 +3,7 @@ import Modal from "@/component/ResuableModal";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAccount, useChainId, useSwitchChain } from "wagmi";
-import { celoSepolia } from "wagmi/chains";
+import { celo } from "wagmi/chains";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useCreateGame } from "@/hooks/useGame";
 import { useGameStore } from "@/store/gameStore";
@@ -28,13 +28,13 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [selectedStakeIndex, setSelectedStakeIndex] = useState(0);
 
-  const isWrongChain = isConnected && chainId !== celoSepolia.id;
+  const isWrongChain = isConnected && chainId !== celo.id;
   const selectedOption = STAKE_OPTIONS[selectedStakeIndex];
 
   const handleSwitchChain = async () => {
     setSwitchError(null);
     try {
-      await switchChainAsync({ chainId: celoSepolia.id });
+      await switchChainAsync({ chainId: celo.id });
     } catch {
       setSwitchError("Failed to switch network. Please switch manually in your wallet.");
     }
@@ -68,7 +68,7 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
       showTransactionToast(
         txId,
         "success",
-        `${celoSepolia.blockExplorers.default.url}/tx/${txId}`
+        `${celo.blockExplorers.default.url}/tx/${txId}`
       );
 
       const gameInfo = await getGameInfo(gameId);

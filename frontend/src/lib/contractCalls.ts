@@ -1,7 +1,7 @@
 "use client";
 
 import { createPublicClient, http, fallback, parseEther, formatEther } from "viem";
-import { celoSepolia } from "wagmi/chains";
+import { celo } from "wagmi/chains";
 import { BREEVS_ABI } from "./BreevsABI";
 export { BREEVS_ABI };
 
@@ -26,16 +26,16 @@ export const STAKE_OPTIONS = [
 
 // ─── Public client for reads ─────────────────────────────────────────────────
 
-const sepoliaTransports = [
-  "https://forno.celo-sepolia.celo-testnet.org", // official Celo Sepolia forno — primary
+const mainnetTransports = [
+  "https://forno.celo.org",
   process.env.NEXT_PUBLIC_CELO_RPC_URL,
 ]
   .filter(Boolean)
   .map((url) => http(url as string));
 
 export const publicClient = createPublicClient({
-  chain: celoSepolia,
-  transport: fallback(sepoliaTransports),
+  chain: celo,
+  transport: fallback(mainnetTransports),
 });
 
 // ─── Enums / Interfaces ──────────────────────────────────────────────────────
@@ -94,52 +94,41 @@ export async function getTotalGames(): Promise<bigint> {
 }
 
 export async function getGameInfo(gameId: bigint): Promise<GameInfo> {
-  const [gameRaw, activePlayers] = await Promise.all([
-    publicClient.readContract({
-      address: CONTRACT_ADDRESS,
-      abi: BREEVS_ABI,
-      functionName: "games",
-      args: [gameId],
-    }),
-    publicClient.readContract({
-      address: CONTRACT_ADDRESS,
-      abi: BREEVS_ABI,
-      functionName: "getActivePlayers",
-      args: [gameId],
-    }),
-  ]);
+  const game = await publicClient.readContract({
+    address: CONTRACT_ADDRESS,
+    abi: BREEVS_ABI,
+    functionName: "getGame",
+    args: [gameId],
+  }) as {
+    creator: string;
+    players: string[];
+    stake: bigint;
+    prizePool: bigint;
+    status: number;
+    roundDuration: bigint;
+    roundEnd: bigint;
+    currentRound: bigint;
+    winner: string;
+    totalRounds: bigint;
+  };
 
-  // games() returns a tuple; we destruct positionally
-  const [creator, stake, prizePool, statusRaw, roundDuration, roundEnd, currentRound, winner, totalRounds] =
-    gameRaw as [string, bigint, bigint, number, bigint, bigint, bigint, string, bigint];
-
-  const status = Number(statusRaw) as GameStatus;
-  const winnerAddr = winner === "0x0000000000000000000000000000000000000000" ? null : winner;
-
-  // Build full player list: active + eliminated
-
-  // We need to figure out eliminated players. We'll get all players from game
-  // by looking at events or doing per-player lookups. For simplicity, we note:
-  // the contract doesn't expose a getPlayers() so we track from active vs stored data.
-  // For now we return activePlayers as players (the contract's players array is private).
-  // We'll resolve eliminated players by checking playerGameData separately when needed.
-  
-  const eliminatedPlayers: string[] = [];
+  const status = Number(game.status) as GameStatus;
+  const winnerAddr = game.winner === "0x0000000000000000000000000000000000000000" ? null : game.winner;
 
   return {
     gameId,
-    creator: creator as string,
-    stake: stake as bigint,
-    prizePool: prizePool as bigint,
-    players: activePlayers as string[],
-    eliminatedPlayers,
-    playerCount: (activePlayers as string[]).length,
-    currentRound: Number(currentRound),
-    roundEnd: roundEnd as bigint,
-    roundDuration: roundDuration as bigint,
+    creator: game.creator,
+    stake: game.stake,
+    prizePool: game.prizePool,
+    players: game.players,
+    eliminatedPlayers: [],
+    playerCount: game.players.length,
+    currentRound: Number(game.currentRound),
+    roundEnd: game.roundEnd,
+    roundDuration: game.roundDuration,
     status,
     winner: winnerAddr,
-    totalRounds: Number(totalRounds),
+    totalRounds: Number(game.totalRounds),
   };
 }
 
@@ -253,7 +242,7 @@ export function createGameArgs(roundDuration: bigint, stake: bigint = MIN_STAKE)
     functionName: "createGame" as const,
     args: [stake, roundDuration] as const,
     value: stake,
-    chain: celoSepolia,
+    chain: celo,
   };
 }
 

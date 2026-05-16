@@ -1,11 +1,12 @@
-// ABI for BreevsRussianRoulette – auto-generated from compiled artifact
+// ABI for BreevsRussianRoulette – mainnet contract 0xfce551a702AbCecCD5cd70f2fa29768bedb5D064
 export const BREEVS_ABI = [
-  {
-    inputs: [{ internalType: "address", name: "_randomContractAddress", type: "address" }],
-    stateMutability: "nonpayable",
-    type: "constructor",
-  },
   // ─── Events ─────────────────────────────────────────────────────────────────
+  {
+    anonymous: false,
+    inputs: [{ indexed: true, internalType: "uint256", name: "gameId", type: "uint256" }],
+    name: "GameCancelled",
+    type: "event",
+  },
   {
     anonymous: false,
     inputs: [
@@ -60,6 +61,15 @@ export const BREEVS_ABI = [
     anonymous: false,
     inputs: [
       { indexed: true, internalType: "uint256", name: "gameId", type: "uint256" },
+      { indexed: false, internalType: "uint256", name: "newRound", type: "uint256" },
+    ],
+    name: "RoundAdvanced",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: "uint256", name: "gameId", type: "uint256" },
       { indexed: false, internalType: "uint256", name: "commitBlock", type: "uint256" },
       { indexed: false, internalType: "uint256", name: "round", type: "uint256" },
     ],
@@ -67,11 +77,12 @@ export const BREEVS_ABI = [
     type: "event",
   },
   // ─── Constants ───────────────────────────────────────────────────────────────
+  { inputs: [], name: "HOST_BALANCE_MULTIPLIER", outputs: [{ internalType: "uint256", name: "", type: "uint256" }], stateMutability: "view", type: "function" },
   { inputs: [], name: "MAX_PLAYERS", outputs: [{ internalType: "uint256", name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "MAX_PLAYER_STAKE", outputs: [{ internalType: "uint256", name: "", type: "uint256" }], stateMutability: "view", type: "function" },
   { inputs: [], name: "MAX_ROUND_DURATION", outputs: [{ internalType: "uint256", name: "", type: "uint256" }], stateMutability: "view", type: "function" },
-  { inputs: [], name: "MAX_STAKE", outputs: [{ internalType: "uint256", name: "", type: "uint256" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "MIN_PLAYER_STAKE", outputs: [{ internalType: "uint256", name: "", type: "uint256" }], stateMutability: "view", type: "function" },
   { inputs: [], name: "MIN_ROUND_DURATION", outputs: [{ internalType: "uint256", name: "", type: "uint256" }], stateMutability: "view", type: "function" },
-  { inputs: [], name: "MIN_STAKE", outputs: [{ internalType: "uint256", name: "", type: "uint256" }], stateMutability: "view", type: "function" },
   { inputs: [], name: "REVEAL_DELAY", outputs: [{ internalType: "uint256", name: "", type: "uint256" }], stateMutability: "view", type: "function" },
   // ─── Write Functions ─────────────────────────────────────────────────────────
   {
@@ -97,7 +108,7 @@ export const BREEVS_ABI = [
   },
   {
     inputs: [
-      { internalType: "uint256", name: "stake", type: "uint256" },
+      { internalType: "uint256", name: "playerStake", type: "uint256" },
       { internalType: "uint256", name: "roundDuration", type: "uint256" },
     ],
     name: "createGame",
@@ -134,7 +145,6 @@ export const BREEVS_ABI = [
     type: "function",
   },
   // ─── Read Functions ──────────────────────────────────────────────────────────
-  { inputs: [], name: "celoRandomAddress", outputs: [{ internalType: "address", name: "", type: "address" }], stateMutability: "view", type: "function" },
   { inputs: [], name: "gameCounter", outputs: [{ internalType: "uint256", name: "", type: "uint256" }], stateMutability: "view", type: "function" },
   {
     inputs: [{ internalType: "uint256", name: "", type: "uint256" }],
@@ -157,6 +167,38 @@ export const BREEVS_ABI = [
     inputs: [{ internalType: "uint256", name: "gameId", type: "uint256" }],
     name: "getActivePlayers",
     outputs: [{ internalType: "address[]", name: "", type: "address[]" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "gameId", type: "uint256" }],
+    name: "getEligiblePlayers",
+    outputs: [{ internalType: "address[]", name: "", type: "address[]" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "gameId", type: "uint256" }],
+    name: "getGame",
+    outputs: [
+      {
+        components: [
+          { internalType: "address", name: "creator", type: "address" },
+          { internalType: "address[]", name: "players", type: "address[]" },
+          { internalType: "uint256", name: "stake", type: "uint256" },
+          { internalType: "uint256", name: "prizePool", type: "uint256" },
+          { internalType: "enum BreevsRussianRoulette.Status", name: "status", type: "uint8" },
+          { internalType: "uint256", name: "roundDuration", type: "uint256" },
+          { internalType: "uint256", name: "roundEnd", type: "uint256" },
+          { internalType: "uint256", name: "currentRound", type: "uint256" },
+          { internalType: "address", name: "winner", type: "address" },
+          { internalType: "uint256", name: "totalRounds", type: "uint256" },
+        ],
+        internalType: "struct BreevsRussianRoulette.Game",
+        name: "",
+        type: "tuple",
+      },
+    ],
     stateMutability: "view",
     type: "function",
   },
@@ -216,13 +258,6 @@ export const BREEVS_ABI = [
     inputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     name: "prizeClaimed",
     outputs: [{ internalType: "bool", name: "", type: "bool" }],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "randomContract",
-    outputs: [{ internalType: "contract IRandom", name: "", type: "address" }],
     stateMutability: "view",
     type: "function",
   },

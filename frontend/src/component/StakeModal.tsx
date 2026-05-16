@@ -4,7 +4,7 @@ import Modal from "@/component/ResuableModal";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAccount } from "wagmi";
-import { celoSepolia } from "wagmi/chains";
+import { celo } from "wagmi/chains";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useJoinGame } from "@/hooks/useGame";
 import { useGameStore } from "@/store/gameStore";
@@ -85,7 +85,7 @@ const StakeModal: React.FC<StakeModalProps> = ({ isOpen, onClose, onSuccess }) =
       showTransactionToast(
         tx.txId as string,
         "success",
-        `${celoSepolia.blockExplorers.default.url}/tx/${tx.txId}`
+        `${celo.blockExplorers.default.url}/tx/${tx.txId}`
       );
       showSuccessToast("Successfully joined the game!", "Success");
 
