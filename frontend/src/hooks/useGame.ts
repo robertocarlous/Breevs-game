@@ -199,7 +199,9 @@ export function useMyGames(): UseQueryResult<GameInfo[], Error> {
         try {
           const game = await getGameInfo(gameId);
           const lowerAddr = address.toLowerCase();
-          if (game.players.map((p) => p.toLowerCase()).includes(lowerAddr)) {
+          const isPlayer = game.players.map((p) => p.toLowerCase()).includes(lowerAddr);
+          const isCreator = game.creator.toLowerCase() === lowerAddr;
+          if (isPlayer || isCreator) {
             games.push(game);
             addGame(game);
           }
