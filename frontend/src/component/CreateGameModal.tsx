@@ -2,13 +2,14 @@
 import Modal from "@/component/ResuableModal";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAccount, useChainId, useSwitchChain } from "wagmi";
+import { useAccount, useChainId, useSwitchChain, useBalance } from "wagmi";
 import { celo } from "wagmi/chains";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useCreateGame } from "@/hooks/useGame";
 import { useGameStore } from "@/store/gameStore";
 import { getGameInfo, STAKE_OPTIONS } from "@/lib/contractCalls";
 import { showErrorToast, showSuccessToast, showTransactionToast } from "@/component/Toast";
+import { formatEther } from "viem";
 
 interface CreateGameModalProps {
   isOpen: boolean;
@@ -30,6 +31,10 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
 
   const isWrongChain = isConnected && chainId !== celo.id;
   const selectedOption = STAKE_OPTIONS[selectedStakeIndex];
+  const { data: balanceData } = useBalance({ address, chainId: celo.id });
+  // Contract requires creator wallet to hold ≥ 5× stake (HOST_BALANCE_MULTIPLIER = 5)
+  const requiredBalance = selectedOption.value * 5n;
+  const hasEnoughBalance = balanceData ? balanceData.value >= requiredBalance : true;
 
   const handleSwitchChain = async () => {
     setSwitchError(null);
@@ -154,7 +159,7 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
           <div className="mb-4 p-3 bg-red-900/30 border border-red-500/50 rounded-xl">
             <p className="text-xs text-red-300 text-center mb-2">
               Wrong network. Switch to{" "}
-              <span className="font-bold text-white">Celo Sepolia Testnet</span>.
+              <span className="font-bold text-white">Celo Mainnet</span>.
             </p>
             {switchError && (
               <p className="text-xs text-red-400 text-center mb-2">{switchError}</p>
@@ -164,7 +169,7 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
               onClick={handleSwitchChain}
               disabled={isSwitching}
             >
-              {isSwitching ? "Switching..." : "Switch to Celo Sepolia"}
+              {isSwitching ? "Switching..." : "Switch to Celo Mainnet"}
             </button>
           </div>
         )}
@@ -178,15 +183,29 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
           </div>
         )}
 
+        {/* Host balance requirement warning */}
+        {isConnected && !isWrongChain && !hasEnoughBalance && (
+          <div className="mb-4 p-3 bg-amber-900/30 border border-amber-500/40 rounded-xl">
+            <p className="text-xs text-amber-300 text-center">
+              ⚠️ Your wallet needs at least{" "}
+              <span className="font-bold text-white">{formatEther(requiredBalance)} CELO</span>{" "}
+              to host this game (5× the stake). You currently have{" "}
+              <span className="font-bold text-white">
+                {balanceData ? Number(formatEther(balanceData.value)).toFixed(3) : "..."} CELO
+              </span>.
+            </p>
+          </div>
+        )}
+
         {/* Create Button */}
         <button
           className={`w-full bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white font-bold py-3 px-4 rounded-xl transition-all duration-300 shadow-lg shadow-red-600/30 text-sm ${
-            isPending || !isConnected || isWrongChain
+            isPending || !isConnected || isWrongChain || !hasEnoughBalance
               ? "opacity-50 cursor-not-allowed"
               : "hover:scale-[1.02] hover:shadow-red-500/50"
           }`}
           onClick={handleCreateGame}
-          disabled={isPending || isWrongChain}
+          disabled={isPending || isWrongChain || !hasEnoughBalance}
         >
           {isPending ? (
             <span className="flex items-center justify-center gap-2">

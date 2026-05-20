@@ -64,6 +64,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
   const [currentBlockNumber, setCurrentBlockNumber] = useState<number>(0);
   const [showCommentary, setShowCommentary] = useState(false);
   const [commentaryTrigger, setCommentaryTrigger] = useState(0);
+  const [commentaryEventType, setCommentaryEventType] = useState<string>("game_started");
 
   const { address, isConnected } = useAccount();
   const { openConnectModal } = useConnectModal();
@@ -220,6 +221,32 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
 
   useEffect(() => { updatePlayers(); }, [updatePlayers]);
 
+  // Auto-show commentary when game data first loads
+  const autoShownRef = useRef(false);
+  useEffect(() => {
+    if (game && !autoShownRef.current) {
+      autoShownRef.current = true;
+      const eventType =
+        game.status === GameStatus.Ended ? "game_ended" :
+        game.status === GameStatus.InProgress ? "game_started" :
+        "generic";
+      setCommentaryEventType(eventType);
+      setShowCommentary(true);
+      setCommentaryTrigger((n) => n + 1);
+    }
+  }, [game]);
+
+  // Fire "game_ended" commentary once winner is set
+  const prevWinnerRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (winner && winner !== prevWinnerRef.current) {
+      prevWinnerRef.current = winner;
+      setCommentaryEventType("game_ended");
+      setShowCommentary(true);
+      setCommentaryTrigger((n) => n + 1);
+    }
+  }, [winner]);
+
   // Fetch Celo block number
   useEffect(() => {
     let isMounted = true;
@@ -334,6 +361,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
       await refreshGameState();
       showSuccess("🎮 Game started! Round 1 begins!");
       setIsProcessing(false);
+      setCommentaryEventType("game_started");
       setShowCommentary(true);
       setCommentaryTrigger((n) => n + 1);
     } catch (err: any) {
@@ -447,6 +475,9 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
             ?? `${lastEliminatedPlayer.slice(0, 6)}...${lastEliminatedPlayer.slice(-4)}`)
         : "A player";
       showSuccess(`💥 ${eliminatedName} has been eliminated!`);
+      const survivorsAfterElim = players.filter((p) => p.status === "Still in" && p.address.toLowerCase() !== lastEliminatedPlayer?.toLowerCase());
+      const nextEventType = survivorsAfterElim.length === 2 ? "last_two_remaining" : "player_eliminated";
+      setCommentaryEventType(nextEventType);
       setShowCommentary(true);
       setCommentaryTrigger((n) => n + 1);
     } catch (err: any) {
@@ -472,6 +503,9 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
       await refreshGameState();
       showSuccess(`⏭️ Round ${(game?.currentRound || 0) + 1} started!`);
       setIsProcessing(false);
+      setCommentaryEventType("round_advanced");
+      setShowCommentary(true);
+      setCommentaryTrigger((n) => n + 1);
     } catch (err: any) {
       showError(err.message || "Failed to advance round");
     }
@@ -702,11 +736,23 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
             eventTrigger={commentaryTrigger}
             onClose={() => setShowCommentary(false)}
             currentRound={game?.currentRound}
-            activePlayers={game?.playerCount}
+            activePlayers={players.filter((p) => p.status === "Still in").length || game?.playerCount}
             totalPlayers={6}
             eliminatedCount={eliminatedMap.size}
             lastEliminatedAddress={lastEliminatedPlayer}
             prizePool={game ? (Number(game.prizePool) / 1e18).toFixed(2) : undefined}
+            eventType={commentaryEventType}
+            lastEliminatedName={
+              lastEliminatedPlayer
+                ? (players.find((p) => p.address.toLowerCase() === lastEliminatedPlayer.toLowerCase())?.name ?? null)
+                : null
+            }
+            winnerName={winner}
+            activePlayerNames={players.filter((p) => p.status === "Still in").map((p) => p.name)}
+            eliminationHistory={[...eliminatedMap.entries()].map(([addr, round]) => ({
+              name: playerInfoRef.current.get(addr)?.name ?? `${addr.slice(0, 6)}...`,
+              round,
+            }))}
           />
         )}
 
@@ -895,12 +941,20 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                     )}
 
                     {/* Re-open AI commentary if user closed it */}
-                    {game?.status === GameStatus.InProgress && !showCommentary && (
+                    {!showCommentary && (
                       <button
-                        onClick={() => { setShowCommentary(true); setCommentaryTrigger((n) => n + 1); }}
+                        onClick={() => {
+                          setCommentaryEventType(
+                            game?.status === GameStatus.Ended ? "game_ended" :
+                            game?.status === GameStatus.InProgress ? "game_started" :
+                            "generic"
+                          );
+                          setShowCommentary(true);
+                          setCommentaryTrigger((n) => n + 1);
+                        }}
                         className="w-full bg-gradient-to-r from-red-900/60 to-red-800/60 hover:brightness-110 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm border border-red-500/30 flex items-center justify-center gap-2"
                       >
-                        🎰 Russian Roulette AI
+                        🎰 Live Commentary
                       </button>
                     )}
                   </div>

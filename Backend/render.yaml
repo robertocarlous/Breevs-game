@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: breevs-backend
+    runtime: python
+    pythonVersion: "3.11.9"
+    buildCommand: ./build.sh
+    startCommand: gunicorn api.wsgi:application --workers 2 --threads 2 --timeout 120
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: CLAUDE_API_KEY
+        sync: false          # you paste this manually in the Render dashboard
+      - key: DATABASE_URL
+        fromDatabase:
+          name: breevs-db
+          property: connectionString
+    autoDeploy: true
+
+databases:
+  - name: breevs-db
+    databaseName: breevs
+    user: breevs
+    plan: free

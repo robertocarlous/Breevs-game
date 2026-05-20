@@ -384,7 +384,7 @@
 #         return Response(serializer.data)
     
 #     @action(detail=True, methods=['post'])
-#     def predict_outcome(self, request, pk=None):
+#     def predict_outcome(self, request, game_id=None):
 #         """
 #         AI-powered prediction of game outcome
         
@@ -1077,7 +1077,7 @@
 #         return Response(serializer.data)
     
 #     @action(detail=True, methods=['post'])
-#     def predict_outcome(self, request, pk=None):
+#     def predict_outcome(self, request, game_id=None):
 #         """
 #         AI-powered prediction of game outcome
         
@@ -1405,39 +1405,56 @@ except Exception:
 
 class GameViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    Read-only viewset for games with AI-powered features using Gemini
+    Read-only viewset for games with AI-powered features using Claude
     """
     permission_classes = [AllowAny]
-    
+    # Use blockchain game_id as the URL lookup instead of Django pk
+    lookup_field = 'game_id'
+
     def get_serializer_class(self):
         if self.action == 'retrieve':
             return GameDetailSerializer
         return GameListSerializer
-    
+
     def get_queryset(self):
         queryset = Game.objects.all().prefetch_related('players', 'events')
-        
+
         status_filter = self.request.query_params.get('status', None)
         if status_filter is not None:
             queryset = queryset.filter(status=int(status_filter))
-        
+
         wallet = self.request.query_params.get('wallet', None)
         if wallet:
             queryset = queryset.filter(players__wallet_address=wallet)
-        
+
         return queryset.order_by('-created_at')
-    
+
+    def _get_or_create_game(self, game_id_str, req_data):
+        """Get the Django Game record by blockchain game_id, creating it if needed."""
+        prize_pool = req_data.get('prize_pool') or '0'
+        stake = req_data.get('stake') or '0'
+        try:
+            prize_decimal = float(prize_pool)
+        except (ValueError, TypeError):
+            prize_decimal = 0.0
+        try:
+            stake_decimal = float(stake)
+        except (ValueError, TypeError):
+            stake_decimal = 0.0
+
+        game, _ = Game.objects.get_or_create(
+            game_id=game_id_str,
+            defaults={
+                'prize_pool': prize_decimal,
+                'stake_amount': stake_decimal,
+                'current_round': int(req_data.get('current_round') or 1),
+            }
+        )
+        return game
+
     @action(detail=True, methods=['get'])
-    def events(self, request, pk=None):
-        """
-        Get all events for a specific game
-        
-        Query Parameters:
-        - type: Filter by event type (optional)
-        
-        Returns: List of game events
-        """
-        game = self.get_object()
+    def events(self, request, game_id=None):
+        game = self._get_or_create_game(game_id, {})
         events = game.events.all()
         
         event_type = request.query_params.get('type', None)
@@ -1448,105 +1465,95 @@ class GameViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(serializer.data)
     
     @action(detail=True, methods=['post'])
-    def generate_live_commentary(self, request, pk=None):
-        """
-        Generate AI-powered live commentary for current game state
-        
-        Method: POST
-        Endpoint: /api/games/{game_id}/generate_live_commentary/
-        
-        Request Body: None
-        
-        Response:
-        {
-            "id": 123,
-            "game": 1,
-            "round_number": 5,
-            "commentary_text": "The tension rises as...",
-            "commentary_type": "live",
-            "tension_level": 8,
-            "context_data": {...},
-            "created_at": "2025-10-13T12:00:00Z"
-        }
-        
-        Errors:
-        - 400: Game not active
-        - 500: AI generation failed
-        """
-        game = self.get_object()
-        
-        if game.is_completed:
-            return Response(
-                {'error': 'Cannot generate commentary for completed game'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+    def generate_live_commentary(self, request, game_id=None):
+        game = self._get_or_create_game(game_id, request.data)
+
         try:
-            # Use frontend-provided live state (blockchain data) rather than the DB
             req = request.data
-            current_round = int(req.get('current_round') or game.current_round or 1)
-            active_players = int(req.get('active_players') or 6)
-            total_players = int(req.get('total_players') or 6)
+            current_round    = int(req.get('current_round') or game.current_round or 1)
+            active_players   = int(req.get('active_players') or 6)
+            total_players    = int(req.get('total_players') or 6)
             eliminated_count = int(req.get('eliminated_count') or 0)
-            last_eliminated = req.get('last_eliminated_address')
-            prize_pool_str = req.get('prize_pool') or str(game.prize_pool)
+            prize_pool_str   = req.get('prize_pool') or str(game.prize_pool)
+            event_type       = req.get('event_type') or 'generic'
+
+            # Rich context the AI can actually use
+            last_eliminated_name  = req.get('last_eliminated_name') or None
+            winner_name           = req.get('winner_name') or None
+            active_player_names   = req.get('active_player_names') or []   # e.g. ["Host", "Player 2", "Player 4"]
+            elimination_history   = req.get('elimination_history') or []   # [{name, round}, ...]
 
             tension_level = min(
                 round(
                     ((total_players - active_players) / max(total_players, 1)) * 5
                     + min(current_round / 10, 1) * 3
                     + (1 if eliminated_count > 0 else 0)
+                    + (2 if active_players == 2 else 0)
                 ),
                 10,
             )
 
-            if last_eliminated:
-                last_action = (
-                    f"Player {last_eliminated[:8]}... was ELIMINATED in Round {current_round}"
+            # Build the elimination history string
+            if elimination_history:
+                elim_lines = ' | '.join(
+                    f"{e.get('name','?')} out round {e.get('round','?')}"
+                    for e in elimination_history
                 )
-            elif eliminated_count == 0:
-                last_action = "Game just started — all 6 players are in"
+                history_str = f"Elimination order so far: {elim_lines}"
             else:
-                last_action = f"{eliminated_count} player(s) eliminated so far"
+                history_str = "No eliminations yet — all 6 players still standing"
 
-            game_context = f"""
-                Current Game State:
-                - Game ID: {game.game_id}
-                - Current Round: {current_round}
-                - Players Remaining: {active_players} of {total_players} ({eliminated_count} eliminated)
-                - Prize Pool: {prize_pool_str} CELO on the Celo blockchain
-                - Tension Level: {tension_level}/10
+            # Survivors list
+            if active_player_names:
+                survivors_str = ', '.join(active_player_names)
+            else:
+                survivors_str = f"{active_players} players still in"
 
-                Most Recent Action:
-                {last_action}
-                """
+            # Event-specific instruction
+            event_instructions = {
+                'game_started':       f"The game has started. 6 players, {prize_pool_str} CELO prize pool. Briefly introduce what's happening and what's at stake.",
+                'player_eliminated':  f"{last_eliminated_name or 'A player'} was eliminated in round {current_round}. {active_players} players remain. Summarise what just happened and who is still in.",
+                'last_two_remaining': f"Two players left — {survivors_str}. {prize_pool_str} CELO goes to whoever survives. Describe the situation clearly.",
+                'round_advanced':     f"Round {current_round} has started. {active_players} players still in, {eliminated_count} eliminated so far. Give a quick update on where things stand.",
+                'game_ended':         f"{winner_name or 'A player'} has won the game and takes {prize_pool_str} CELO. Wrap up what happened.",
+                'spin_requested':     f"A spin has been requested in round {current_round}. {active_players} players are still in. Describe what is about to happen.",
+                'generic':            f"Game #{game.game_id}, round {current_round}, {active_players} of {total_players} players remaining, {prize_pool_str} CELO prize pool. Give a short update.",
+            }
+            instruction = event_instructions.get(event_type, event_instructions['generic'])
 
-            prompt = f"""You are a hyped live sports commentator for a Celo blockchain Russian Roulette game.
-                React directly to the MOST RECENT ACTION and the current game state.
-                Reference the actual CELO prize pool, the specific round number, and how many players are left.
-                DO NOT mention STX, Stacks, or any other blockchain.
+            system_prompt = """You are watching a live Russian Roulette game and giving a short update to someone who is also watching.
 
-                Rules:
-                - 2-3 punchy sentences maximum
-                - React to what JUST happened (the most recent action above)
-                - Build tension around who could be eliminated NEXT
-                - Reference the CELO prize pool amount to raise the stakes
-                - Make it feel like you're watching it live right now
+Talk like a normal person would. Not a TV presenter, not a sports anchor — just someone who is watching and telling their friend what just happened.
 
-                {game_context}
+Rules:
+- 2 sentences only. No more.
+- Mention the player names (Host, Player 2, etc.) and the CELO prize amount.
+- Call it "Russian Roulette" or "the game" — not "Celo" or "on-chain".
+- Only say "CELO" when talking about the money. Never say "on Celo" as a phrase at the end of a sentence.
+- No filler phrases like "as we move forward", "let's see", "things are heating up", "all eyes are on".
+- Write how a person actually talks. Short sentences. Normal words."""
 
-                Commentary:"""
-            
+            full_prompt = f"""{instruction}
+
+Facts:
+- Game #{game.game_id}, round {current_round}, {active_players} of {total_players} players left
+- Prize: {prize_pool_str} CELO
+- Still in: {survivors_str}
+- {history_str}
+
+2 sentences. Sound like a normal person."""
+
             if anthropic_client:
                 response = anthropic_client.messages.create(
                     model="claude-haiku-4-5-20251001",
-                    max_tokens=300,
-                    messages=[{"role": "user", "content": prompt}]
+                    max_tokens=220,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": full_prompt}]
                 )
-                commentary_text = response.content[0].text
+                commentary_text = response.content[0].text.strip()
             else:
-                commentary_text = "Tension rises as the wheel spins... (Claude API not configured)"
-            
+                commentary_text = f"Round {current_round}. {active_players} left. {prize_pool_str} CELO up for grabs. (Claude API not configured)"
+
             commentary = GameCommentary.objects.create(
                 game=game,
                 round_number=current_round,
@@ -1554,15 +1561,16 @@ class GameViewSet(viewsets.ReadOnlyModelViewSet):
                 commentary_type='live',
                 tension_level=tension_level,
                 context_data={
+                    'event_type': event_type,
                     'active_players': active_players,
                     'eliminated_count': eliminated_count,
                     'prize_pool': prize_pool_str,
                 }
             )
-            
+
             serializer = GameCommentarySerializer(commentary)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-            
+
         except Exception as e:
             return Response(
                 {'error': f'Failed to generate commentary: {str(e)}'},
@@ -1570,45 +1578,22 @@ class GameViewSet(viewsets.ReadOnlyModelViewSet):
             )
     
     @action(detail=True, methods=['get'])
-    def commentaries(self, request, pk=None):
-        """
-        Get all AI commentaries for a game
-        
-        Method: GET
-        Endpoint: /api/games/{game_id}/commentaries/
-        
-        Query Parameters:
-        - type: Filter by commentary type (live, prediction, analysis, highlight)
-        - limit: Number of commentaries to return (default: 10)
-        
-        Response:
-        [
-            {
-                "id": 123,
-                "round_number": 5,
-                "commentary_text": "...",
-                "commentary_type": "live",
-                "tension_level": 8,
-                "created_at": "..."
-            },
-            ...
-        ]
-        """
-        game = self.get_object()
+    def commentaries(self, request, game_id=None):
+        game = self._get_or_create_game(game_id, {})
         commentaries = GameCommentary.objects.filter(game=game)
-        
+
         commentary_type = request.query_params.get('type', None)
         if commentary_type:
             commentaries = commentaries.filter(commentary_type=commentary_type)
-        
+
         limit = int(request.query_params.get('limit', 10))
         commentaries = commentaries.order_by('-created_at')[:limit]
-        
+
         serializer = GameCommentarySerializer(commentaries, many=True)
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'])
-    def generate_summary(self, request, pk=None):
+    def generate_summary(self, request, game_id=None):
         """
         Generate comprehensive AI summary for completed game
         
@@ -1641,7 +1626,7 @@ class GameViewSet(viewsets.ReadOnlyModelViewSet):
         - 200: Summary already exists (returns existing)
         - 500: AI generation failed
         """
-        game = self.get_object()
+        game = self._get_or_create_game(game_id, request.data)
         
         if not game.is_completed:
             return Response(
@@ -1766,19 +1751,8 @@ class GameViewSet(viewsets.ReadOnlyModelViewSet):
             )
     
     @action(detail=True, methods=['get'])
-    def summary(self, request, pk=None):
-        """
-        Get existing AI summary for a game
-        
-        Method: GET
-        Endpoint: /api/games/{game_id}/summary/
-        
-        Response: GameSummary object (see generate_summary for structure)
-        
-        Errors:
-        - 404: No summary found
-        """
-        game = self.get_object()
+    def summary(self, request, game_id=None):
+        game = self._get_or_create_game(game_id, {})
         
         if not hasattr(game, 'summary'):
             return Response(
@@ -1790,7 +1764,7 @@ class GameViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(serializer.data)
     
     @action(detail=True, methods=['post'])
-    def predict_outcome(self, request, pk=None):
+    def predict_outcome(self, request, game_id=None):
         """
         AI-powered prediction of game outcome
         
@@ -1823,10 +1797,10 @@ class GameViewSet(viewsets.ReadOnlyModelViewSet):
         Errors:
         - 400: Game already completed
         - 500: Prediction failed
-        
+
         Note: Results are cached for 5 minutes per round
         """
-        game = self.get_object()
+        game = self._get_or_create_game(game_id, request.data)
         
         if game.is_completed:
             return Response(
