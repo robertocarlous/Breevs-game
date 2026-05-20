@@ -3,17 +3,27 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
+interface EliminationRecord {
+  name: string;
+  round: number;
+}
+
 interface AICommentaryBoxProps {
   gameId: bigint;
   eventTrigger: number;
   onClose: () => void;
-  // game state passed to backend so AI has real context
   currentRound?: number;
   activePlayers?: number;
   totalPlayers?: number;
   eliminatedCount?: number;
   lastEliminatedAddress?: string | null;
   prizePool?: string;
+  // richer context for human-sounding commentary
+  eventType?: string;
+  lastEliminatedName?: string | null;
+  winnerName?: string | null;
+  activePlayerNames?: string[];
+  eliminationHistory?: EliminationRecord[];
 }
 
 interface Commentary {
@@ -27,18 +37,22 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:800
 export default function AICommentaryBox({
   gameId, eventTrigger, onClose,
   currentRound, activePlayers, totalPlayers, eliminatedCount, lastEliminatedAddress, prizePool,
+  eventType, lastEliminatedName, winnerName, activePlayerNames, eliminationHistory,
 }: AICommentaryBoxProps) {
   const [commentary, setCommentary] = useState<Commentary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [displayedText, setDisplayedText] = useState("");
+  const isLoadingRef = useRef(false);
+  const isTypingRef = useRef(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isMinimised, setIsMinimised] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevTrigger = useRef(-1);
 
   const fetchCommentary = async () => {
-    if (isLoading) return;
+    if (isLoadingRef.current) return;
+    isLoadingRef.current = true;
     setIsLoading(true);
     setError(null);
     setDisplayedText("");
@@ -56,6 +70,11 @@ export default function AICommentaryBox({
             eliminated_count: eliminatedCount ?? 0,
             last_eliminated_address: lastEliminatedAddress ?? null,
             prize_pool: prizePool ?? null,
+            event_type: eventType ?? "generic",
+            last_eliminated_name: lastEliminatedName ?? null,
+            winner_name: winnerName ?? null,
+            active_player_names: activePlayerNames ?? [],
+            elimination_history: eliminationHistory ?? [],
           }),
         }
       );
@@ -74,12 +93,14 @@ export default function AICommentaryBox({
     } catch (err: any) {
       setError(err.message || "Could not fetch commentary");
     } finally {
+      isLoadingRef.current = false;
       setIsLoading(false);
     }
   };
 
   const typewriterEffect = (text: string) => {
     if (timerRef.current) clearTimeout(timerRef.current);
+    isTypingRef.current = true;
     setIsTyping(true);
     setDisplayedText("");
     let i = 0;
@@ -89,13 +110,14 @@ export default function AICommentaryBox({
         i++;
         timerRef.current = setTimeout(type, 18);
       } else {
+        isTypingRef.current = false;
         setIsTyping(false);
       }
     };
     type();
   };
 
-  // Auto-fetch whenever a game event fires
+  // Fetch when a game event fires
   useEffect(() => {
     if (gameId <= 0n) return;
     if (eventTrigger === prevTrigger.current) return;
@@ -105,6 +127,17 @@ export default function AICommentaryBox({
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [eventTrigger, gameId]);
+
+  // Auto-refresh every 30 seconds so commentary stays live without user action
+  useEffect(() => {
+    if (gameId <= 0n) return;
+    const interval = setInterval(() => {
+      if (!isLoadingRef.current && !isTypingRef.current) {
+        fetchCommentary();
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [gameId, activePlayers, currentRound, eliminatedCount]);
 
   const tensionColor = (l: number) => l >= 8 ? "text-red-400" : l >= 5 ? "text-orange-400" : "text-yellow-400";
   const tensionLabel = (l: number) => l >= 9 ? "CRITICAL" : l >= 7 ? "HIGH" : l >= 5 ? "MEDIUM" : "LOW";

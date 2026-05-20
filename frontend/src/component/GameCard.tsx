@@ -74,6 +74,7 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
       case GameStatus.Active: return "Active";
       case GameStatus.InProgress: return "In Progress";
       case GameStatus.Ended: return "Ended";
+      case GameStatus.Cancelled: return "Cancelled";
       default: return "Unknown";
     }
   };
@@ -84,6 +85,7 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
       case GameStatus.Active: return "bg-green-500/20 text-green-400 border-green-500/30";
       case GameStatus.InProgress: return "bg-amber-500/20 text-amber-400 border-amber-500/30";
       case GameStatus.Ended: return "bg-gray-500/20 text-gray-400 border-gray-500/30";
+      case GameStatus.Cancelled: return "bg-red-900/20 text-red-400 border-red-900/30";
       default: return "bg-gray-500/20 text-gray-400 border-gray-500/30";
     }
   };
@@ -94,6 +96,7 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
       case GameStatus.Active: return "bg-green-400 animate-pulse";
       case GameStatus.InProgress: return "bg-amber-400 animate-pulse";
       case GameStatus.Ended: return "bg-gray-400";
+      case GameStatus.Cancelled: return "bg-red-900";
       default: return "bg-gray-400";
     }
   };

@@ -44,6 +44,7 @@ export enum GameStatus {
   Active = 0,     // CREATED
   InProgress = 1, // IN_PROGRESS
   Ended = 2,      // COMPLETED
+  Cancelled = 3,  // CANCELLED (creator called cancelGame)
 }
 
 export interface GameInfo {

@@ -24,6 +24,10 @@ export default function StatusBadge({ status, playerCount }: StatusBadgeProps) {
       color = "bg-gray-600";
       text = "Ended";
       break;
+    case GameStatus.Cancelled:
+      color = "bg-red-900";
+      text = "Cancelled";
+      break;
     default:
       color = "bg-gray-600";
       text = "Unknown";

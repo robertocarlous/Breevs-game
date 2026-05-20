@@ -109,17 +109,17 @@ export const useGameStore = create<GameStore>()(
           const updateGame = (g: GameInfo) =>
             g.gameId === gameId ? { ...g, status } : g;
 
+          const isOver = status === GameStatus.Ended || status === GameStatus.Cancelled;
+
           const newCurrentPlayerGame =
-            state.currentPlayerGame?.gameId === gameId &&
-            status === GameStatus.Ended
+            state.currentPlayerGame?.gameId === gameId && isOver
               ? null
               : state.currentPlayerGame?.gameId === gameId
               ? { ...state.currentPlayerGame, status }
               : state.currentPlayerGame;
 
           const newCurrentCreatorGame =
-            state.currentCreatorGame?.gameId === gameId &&
-            status === GameStatus.Ended
+            state.currentCreatorGame?.gameId === gameId && isOver
               ? null
               : state.currentCreatorGame?.gameId === gameId
               ? { ...state.currentCreatorGame, status }
@@ -176,27 +176,29 @@ export const useGameStore = create<GameStore>()(
 
       setCurrentPlayerGame: (game, stxAddress) => {
         if (!stxAddress) return;
+        const isOver = (s: GameStatus) => s === GameStatus.Ended || s === GameStatus.Cancelled;
         const hasActive = get().hasActiveGame(stxAddress);
-        if (hasActive && game && game.status !== GameStatus.Ended) {
-          return; // Prevent setting if user has an active game
+        if (hasActive && game && !isOver(game.status)) {
+          return;
         }
-        if (game && game.status === GameStatus.Ended) {
+        if (game && isOver(game.status)) {
           set({ currentPlayerGame: null });
         } else {
           set({ currentPlayerGame: game });
           if (game && !get().myGames.some((g) => g.gameId === game.gameId)) {
-            get().addToMyGames(game); // Ensure game is added to myGames
+            get().addToMyGames(game);
           }
         }
       },
 
       setCurrentCreatorGame: (game) => {
-        if (game && game.status === GameStatus.Ended) {
+        const isOver = (s: GameStatus) => s === GameStatus.Ended || s === GameStatus.Cancelled;
+        if (game && isOver(game.status)) {
           set({ currentCreatorGame: null });
         } else {
           set({ currentCreatorGame: game });
           if (game && !get().myGames.some((g) => g.gameId === game.gameId)) {
-            get().addToMyGames(game); // Ensure game is added to myGames
+            get().addToMyGames(game);
           }
         }
       },
@@ -204,47 +206,45 @@ export const useGameStore = create<GameStore>()(
       restrictPlayerActions: (stxAddress) => {
         if (!stxAddress) return false;
         const { currentPlayerGame } = get();
+        const isOver = (s: GameStatus) => s === GameStatus.Ended || s === GameStatus.Cancelled;
         return (
           currentPlayerGame !== null &&
           currentPlayerGame.players.includes(stxAddress) &&
-          currentPlayerGame.status !== GameStatus.Ended
+          !isOver(currentPlayerGame.status)
         );
       },
 
       restrictCreatorActions: (stxAddress) => {
         if (!stxAddress) return false;
         const { currentCreatorGame } = get();
+        const isOver = (s: GameStatus) => s === GameStatus.Ended || s === GameStatus.Cancelled;
         return (
           currentCreatorGame !== null &&
           currentCreatorGame.creator === stxAddress &&
-          currentCreatorGame.status !== GameStatus.Ended
+          !isOver(currentCreatorGame.status)
         );
       },
 
       hasActiveGame: (stxAddress) => {
         if (!stxAddress) return false;
         const { myGames } = get();
-
-        // Prioritize myGames as the source of truth
+        const isOver = (s: GameStatus) => s === GameStatus.Ended || s === GameStatus.Cancelled;
         return myGames.some(
           (game) =>
-            (game.players.includes(stxAddress) ||
-              game.creator === stxAddress) &&
-            game.status !== GameStatus.Ended
+            (game.players.includes(stxAddress) || game.creator === stxAddress) &&
+            !isOver(game.status)
         );
       },
 
       getCurrentActiveGame: (stxAddress) => {
         if (!stxAddress) return null;
         const { myGames } = get();
-
-        // Prioritize myGames as the source of truth
+        const isOver = (s: GameStatus) => s === GameStatus.Ended || s === GameStatus.Cancelled;
         return (
           myGames.find(
             (game) =>
-              (game.players.includes(stxAddress) ||
-                game.creator === stxAddress) &&
-              game.status !== GameStatus.Ended
+              (game.players.includes(stxAddress) || game.creator === stxAddress) &&
+              !isOver(game.status)
           ) || null
         );
       },
