@@ -2,6 +2,7 @@ services:
   - type: web
     name: breevs-backend
     runtime: python
+    pythonVersion: "3.11.9"
     buildCommand: ./build.sh
     startCommand: gunicorn api.wsgi:application --workers 2 --threads 2 --timeout 120
     envVars:
