@@ -21,6 +21,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Breevs",
   description: "Breevs Spin Game",
+  other: {
+    "talentapp:project_verification":
+      "5256cc72d8fe27bb070f95d45de9039123ac25a8536d5a5f33ee983af63f495cf85765294859e6321350a876027761d904d4992687eb7682dd8bed37c47acbb8",
+  },
 };
 
 export default function RootLayout({
