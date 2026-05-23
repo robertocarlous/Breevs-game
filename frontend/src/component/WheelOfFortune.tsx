@@ -18,7 +18,7 @@ import {
   useCancelGame,
 } from "@/hooks/useGame";
 import { GameStatus, getCeloBlockNumber, publicClient, CONTRACT_ADDRESS, BREEVS_ABI, MIN_STAKE } from "@/lib/contractCalls";
-import { formatEther, parseAbiItem } from "viem";
+import { formatEther, parseAbiItem, parseEventLogs } from "viem";
 import BackgroundImgBlur from "@/component/BackgroundBlur";
 import Link from "next/link";
 import StakeModal from "@/component/StakeModal";
@@ -61,6 +61,8 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
   const playerInfoRef = useRef(new Map<string, { addr: string; name: string }>());
   const spinActiveRef = useRef(false);
   const liveRotationRef = useRef(0);
+  // Stable snapshot of the full player list — keeps the polling closure non-stale
+  const allPlayersRef = useRef<string[]>([]);
   const [currentBlockNumber, setCurrentBlockNumber] = useState<number>(0);
   const [showCommentary, setShowCommentary] = useState(false);
   const [commentaryTrigger, setCommentaryTrigger] = useState(0);
@@ -105,6 +107,75 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
     );
   }
 
+  // Keep allPlayersRef current so the polling closure below is never stale
+  useEffect(() => {
+    if (game?.players?.length) allPlayersRef.current = game.players;
+  }, [game?.players]);
+
+  // Poll getActivePlayers every 5 s to detect eliminations.
+  // This is far more reliable in the browser than getLogs (which silently fails with
+  // the fallback transport). getActivePlayers is a plain view call — always works.
+  // We diff it against allPlayersRef (full list) to find who got eliminated,
+  // then read playerGameData for their round number.
+  useEffect(() => {
+    if (!gameId) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      const allPlayers = allPlayersRef.current;
+      if (!allPlayers.length) return;
+      try {
+        const active = (await publicClient.readContract({
+          address: CONTRACT_ADDRESS,
+          abi: BREEVS_ABI,
+          functionName: "getActivePlayers",
+          args: [gameId],
+        })) as string[];
+        if (cancelled) return;
+
+        const activeLower = new Set(active.map((a: string) => a.toLowerCase()));
+        const eliminated = allPlayers.filter((p) => !activeLower.has(p.toLowerCase()));
+        if (eliminated.length === 0) return;
+
+        // Fetch elimination round for each eliminated player in parallel
+        const entries = await Promise.all(
+          eliminated.map(async (player): Promise<[string, number]> => {
+            const key = player.toLowerCase();
+            try {
+              const pd = (await publicClient.readContract({
+                address: CONTRACT_ADDRESS,
+                abi: BREEVS_ABI,
+                functionName: "playerGameData",
+                args: [gameId, player as `0x${string}`],
+              })) as [boolean, bigint];
+              return [key, Number(pd[1])];
+            } catch {
+              return [key, 0];
+            }
+          })
+        );
+
+        if (cancelled) return;
+
+        setEliminatedMap((prev) => {
+          let changed = false;
+          const next = new Map(prev);
+          entries.forEach(([key, round]) => {
+            if (!next.has(key)) { next.set(key, round); changed = true; }
+          });
+          return changed ? next : prev;
+        });
+      } catch (err) {
+        console.error("[elim-poll]", err);
+      }
+    };
+
+    poll(); // immediate on mount
+    const iv = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(iv); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameId]);
+
   // Build stable name registry from PlayerJoined events + fetch past eliminations
   useEffect(() => {
     if (!gameId || !game?.creator || currentBlockNumber === 0) return;
@@ -142,20 +213,30 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
           joinIdx++;
         });
 
-        // Seed eliminated map from historical events
-        const map = new Map<string, number>();
+        // Seed / merge eliminated map from historical events.
+        // Use functional update so we never overwrite newer state (e.g. from receipt parser).
+        const seedEntries: Array<[string, number]> = [];
         (elimLogs as any[]).forEach((log) => {
           if ((log.args.gameId as bigint) !== gameId) return;
           const addr: string = log.args.player;
           const round: bigint = log.args.round;
-          map.set(addr.toLowerCase(), Number(round));
           const key = addr.toLowerCase();
+          seedEntries.push([key, Number(round)]);
           if (!infoMap.has(key)) {
             const idx = infoMap.size;
             infoMap.set(key, { addr, name: `Player ${idx + 1}` });
           }
         });
-        if (map.size > 0) setEliminatedMap(map);
+        if (seedEntries.length > 0) {
+          setEliminatedMap((prev) => {
+            const next = new Map(prev);
+            let changed = false;
+            seedEntries.forEach(([key, round]) => {
+              if (!next.has(key)) { next.set(key, round); changed = true; }
+            });
+            return changed ? next : prev;
+          });
+        }
       })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -176,6 +257,23 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
         });
       }
     });
+
+    // Seed eliminatedMap from game.eliminatedPlayers (returned by getGameInfo via getActivePlayers diff).
+    // This gives us immediate elimination detection after each refetch(), without waiting for the poll.
+    if (game.eliminatedPlayers?.length) {
+      setEliminatedMap((prev) => {
+        let changed = false;
+        const next = new Map(prev);
+        game.eliminatedPlayers.forEach((addr) => {
+          const key = addr.toLowerCase();
+          if (!next.has(key)) {
+            next.set(key, 0); // round unknown at this point; polling will fill it in
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }
 
     // All unique player keys: combine active list + event-tracked eliminated
     // eliminatedMap takes priority — a player in it is always "Eliminated"
@@ -344,8 +442,10 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
 
   const refreshGameState = async () => {
     try {
-      await refetch();
-      if (game) updateGameStatus(game.gameId, game.status);
+      const result = await refetch();
+      // Use the fresh data from refetch (not the stale `game` closure variable)
+      const freshGame = result.data;
+      if (freshGame) updateGameStatus(freshGame.gameId, freshGame.status);
     } catch {}
   };
 
@@ -375,7 +475,9 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
     setError(null); setIsProcessing(true);
     try {
       if (game?.status !== GameStatus.InProgress) throw new Error("Game is not in progress");
-      if (game?.playerCount <= 1) throw new Error("Not enough players to spin");
+      // Use actual active players count — game.players always includes eliminated players
+      const activePlayers = players.filter((p) => p.status === "Still in");
+      if (activePlayers.length <= 1) throw new Error("Not enough players to spin");
       if (address?.toLowerCase() !== game?.creator.toLowerCase()) throw new Error("Only the game creator can spin");
       if (game?.roundEnd && currentBlockNumber > 0 && currentBlockNumber >= Number(game.roundEnd))
         throw new Error("Round has expired. Please advance to the next round.");
@@ -416,43 +518,116 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
       };
       const spinPromise = fastSpinLoop();
 
-      // Fire transaction while wheel spins
-      await resolveSpin({ gameId });
+      // Fire transaction while wheel spins — get the hash back so we can read the receipt
+      const resolveResult = await resolveSpin({ gameId });
+      const txHash = resolveResult.txId as `0x${string}`;
 
       // Stop fast spin
       spinActiveRef.current = false;
       await spinPromise;
 
-      // Refresh to get updated players + eliminated address (also set by event watcher)
+      // ── Read eliminated player FROM THE RECEIPT LOGS (never stale) ────────────
+      // The receipt is already confirmed (writeContractAsync waited for it).
+      // Parsing receipt logs is always accurate — no RPC read-after-write race.
+      const gameSnapshot = game; // stable player list (players[] never shrinks)
+      let eliminatedAddr: string | null = null;
+      let eliminatedRound: number = gameSnapshot?.currentRound ?? 1;
+
+      try {
+        const receipt = await publicClient.getTransactionReceipt({ hash: txHash });
+        const elimLogs = parseEventLogs({
+          abi: BREEVS_ABI,
+          logs: receipt.logs,
+          eventName: "PlayerEliminated",
+        });
+        // Find the log for THIS game (receipt may contain other events)
+        const thisGameLog = (elimLogs as any[]).find(
+          (l) => String(l.args?.gameId) === String(gameId)
+        );
+        if (thisGameLog?.args) {
+          eliminatedAddr = thisGameLog.args.player as string;
+          eliminatedRound = Number(thisGameLog.args.round as bigint) || eliminatedRound;
+        }
+      } catch (logErr) {
+        console.error("[resolveSpinAction] receipt log parse failed:", logErr);
+      }
+
+      // ── Fallback: if receipt parsing didn't detect an eliminated player,
+      // call getActivePlayers immediately and diff against the full player list ──
+      if (!eliminatedAddr) {
+        try {
+          const active = (await publicClient.readContract({
+            address: CONTRACT_ADDRESS,
+            abi: BREEVS_ABI,
+            functionName: "getActivePlayers",
+            args: [gameId],
+          })) as string[];
+          const activeLower = new Set(active.map((a: string) => a.toLowerCase()));
+          const snapshot = allPlayersRef.current;
+          for (const p of snapshot) {
+            const key = p.toLowerCase();
+            // Player is in the full list, not active anymore, and not already in eliminatedMap
+            if (!activeLower.has(key) && !eliminatedMap.has(key)) {
+              eliminatedAddr = p;
+              // Fetch elimination round from contract
+              try {
+                const pd = (await publicClient.readContract({
+                  address: CONTRACT_ADDRESS,
+                  abi: BREEVS_ABI,
+                  functionName: "playerGameData",
+                  args: [gameId, p as `0x${string}`],
+                })) as [boolean, bigint];
+                eliminatedRound = Number(pd[1]) || eliminatedRound;
+              } catch {}
+              break;
+            }
+          }
+        } catch (fallbackErr) {
+          console.error("[resolveSpinAction] fallback getActivePlayers failed:", fallbackErr);
+        }
+      }
+
+      // Update eliminatedMap immediately — functional update avoids stale-closure issues
+      // (we never read eliminatedMap from the closure; React always passes the latest value)
+      let knownElimCount = 0;
+      if (eliminatedAddr) {
+        const _addr = eliminatedAddr;
+        const _round = eliminatedRound;
+        setEliminatedMap((prev) => {
+          const key = _addr.toLowerCase();
+          if (prev.has(key)) { knownElimCount = prev.size; return prev; }
+          const next = new Map(prev);
+          next.set(key, _round);
+          knownElimCount = next.size;
+          return next;
+        });
+        setLastEliminatedPlayer(_addr);
+      }
+
+      // Refresh game state — await it so winner / GameStatus.Ended is detected immediately
       await refreshGameState();
 
-      // ── Calculate landing angle ────────────────────────────────────────
-      // Players occupy 6 fixed slots on the wheel at angles 0°, 60°, 120°...
-      // We want the eliminated player's slot to end up at 0° (the top pointer).
+      // ── Calculate landing angle ───────────────────────────────────────────────
+      // Players occupy 6 fixed slots: slot 0 = 0°, slot 1 = 60°, etc.
       const playersSnapshot = [...players];
       let eliminatedSlotIdx = 0;
-      if (lastEliminatedPlayer) {
+      if (eliminatedAddr) {
         const idx = playersSnapshot.findIndex(
-          (p) => p.address.toLowerCase() === lastEliminatedPlayer.toLowerCase()
+          (p) => p.address.toLowerCase() === eliminatedAddr!.toLowerCase()
         );
         if (idx >= 0) eliminatedSlotIdx = idx;
       }
 
-      // Each of the 6 slots is 60° apart on the wheel
       const slotAngle = eliminatedSlotIdx * 60;
-      // To land this slot at the pointer (top = 0°):
-      // (slotAngle + wheelRotation) mod 360 = 0
-      // wheelRotation mod 360 = (360 - slotAngle) mod 360
       const targetMod = (360 - slotAngle) % 360;
       const currentMod = liveRotationRef.current % 360;
       let extra = targetMod - currentMod;
       if (extra <= 0) extra += 360;
 
-      // Add 2 full spins for drama + settle
       const fromRot = liveRotationRef.current;
       const toRot = fromRot + extra + 720;
 
-      // Decelerate smoothly (ease-out cubic)
+      // Decelerate smoothly (ease-out cubic) — 70 × 35 ms = ~2.5 s
       const steps = 70;
       for (let i = 0; i <= steps; i++) {
         await new Promise((r) => setTimeout(r, 35));
@@ -461,7 +636,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
         setRotation(fromRot + (toRot - fromRot) * eased);
       }
 
-      // ── Impact effects ─────────────────────────────────────────────────
+      // ── Impact effects ────────────────────────────────────────────────────────
       setEliminationFlash(true);
       setShaking(true);
       setTimeout(() => setEliminationFlash(false), 900);
@@ -470,13 +645,18 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
       setIsSpinning(false);
       setIsProcessing(false);
 
-      const eliminatedName = lastEliminatedPlayer
-        ? (players.find((p) => p.address.toLowerCase() === lastEliminatedPlayer.toLowerCase())?.name
-            ?? `${lastEliminatedPlayer.slice(0, 6)}...${lastEliminatedPlayer.slice(-4)}`)
+      // Use playerInfoRef (always current — not a stale closure) for the name
+      const eliminatedName = eliminatedAddr
+        ? (playerInfoRef.current.get(eliminatedAddr.toLowerCase())?.name
+            ?? playersSnapshot.find((p) => p.address.toLowerCase() === eliminatedAddr!.toLowerCase())?.name
+            ?? `${eliminatedAddr.slice(0, 6)}...${eliminatedAddr.slice(-4)}`)
         : "A player";
       showSuccess(`💥 ${eliminatedName} has been eliminated!`);
-      const survivorsAfterElim = players.filter((p) => p.status === "Still in" && p.address.toLowerCase() !== lastEliminatedPlayer?.toLowerCase());
-      const nextEventType = survivorsAfterElim.length === 2 ? "last_two_remaining" : "player_eliminated";
+
+      // Survivor count: total players minus confirmed eliminations (knownElimCount set above)
+      const totalPlayers = gameSnapshot?.players?.length ?? 6;
+      const activeCount = totalPlayers - knownElimCount;
+      const nextEventType = activeCount === 2 ? "last_two_remaining" : "player_eliminated";
       setCommentaryEventType(nextEventType);
       setShowCommentary(true);
       setCommentaryTrigger((n) => n + 1);
@@ -577,9 +757,12 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
     currentBlockNumber > 0 &&
     currentBlockNumber > Number(pendingSpin.commitBlock) + 500;
 
+  // Active player count — game.playerCount is total (includes eliminated), so we use players state
+  const activePlayerCount = players.filter((p) => p.status === "Still in").length;
+
   const canRequestSpin = () =>
     game?.status === GameStatus.InProgress &&
-    game?.playerCount > 1 &&
+    activePlayerCount > 1 &&
     isConnected &&
     address?.toLowerCase() === game?.creator.toLowerCase() &&
     (!pendingSpin?.pending || isSpinExpired()) &&
@@ -1095,7 +1278,7 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                 <div className="bg-gradient-to-br from-[#030b1f]/95 to-[#0a1529]/95 backdrop-blur-md rounded-xl border border-red-500/20 p-4 shadow-xl sticky top-4">
                   <h3 className="text-base sm:text-lg font-bold text-white mb-3">👥 Participants</h3>
                   <div className="space-y-2">
-                    <p className="text-xs text-gray-400 mb-2">Players ({game?.playerCount || 0}/6)</p>
+                    <p className="text-xs text-gray-400 mb-2">Players ({activePlayerCount} active / {game?.playerCount || 0} total)</p>
                     {players.length === 0 && (
                       <div className="bg-white/5 border border-white/10 rounded-lg p-3 text-center">
                         <p className="text-xs text-gray-400">Waiting for players to join...</p>

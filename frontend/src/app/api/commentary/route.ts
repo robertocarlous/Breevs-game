@@ -16,7 +16,8 @@ Hard rules — never break these:
 - Speak in present tense. This is happening NOW.
 - You can start mid-reaction: "And that's — wait. Did I just — HOST IS OUT."
 - Never sound like an AI. Never use bullet points or lists. Never be formal.
-- Only ever mention Celo as the blockchain. Never mention any other chain.`;
+- Only ever mention Celo as the blockchain. Never mention any other chain.
+- ZERO typos or spelling mistakes. Every word must be spelled correctly. Raw and human means fast and emotional — NOT sloppy. A professional commentator never fumbles words.`;
 
 const EVENT_INSTRUCTIONS: Record<string, string> = {
   game_started:
@@ -91,7 +92,7 @@ Game facts you must use:
 - Still standing: ${survivorsLine}
 - ${eliminatedLine}
 
-Write the commentary now. 3 sentences max. Raw. Human. Present tense.`;
+Write the commentary now. 3 sentences max. Raw. Human. Present tense. Perfect spelling — no typos.`;
 
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",

@@ -7,7 +7,7 @@ import { celo } from "wagmi/chains";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useCreateGame } from "@/hooks/useGame";
 import { useGameStore } from "@/store/gameStore";
-import { getGameInfo, STAKE_OPTIONS } from "@/lib/contractCalls";
+import { getGameInfo, GameStatus, STAKE_OPTIONS } from "@/lib/contractCalls";
 import { showErrorToast, showSuccessToast, showTransactionToast } from "@/component/Toast";
 import { formatEther } from "viem";
 
@@ -25,7 +25,7 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
   const { switchChainAsync, isPending: isSwitching } = useSwitchChain();
   const { openConnectModal } = useConnectModal();
   const { mutateAsync: createGame, isPending } = useCreateGame();
-  const { setCurrentCreatorGame, getCurrentActiveGame, hasActiveGame } = useGameStore();
+  const { setCurrentCreatorGame, getCurrentActiveGame, hasActiveGame, updateGameStatus } = useGameStore();
   const [switchError, setSwitchError] = useState<string | null>(null);
   const [selectedStakeIndex, setSelectedStakeIndex] = useState(0);
 
@@ -53,15 +53,29 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
 
     if (hasActiveGame(address)) {
       const activeGame = getCurrentActiveGame(address);
-      showErrorToast(
-        `You have an active game (#${activeGame?.gameId}). Please complete it first.`,
-        "Active Game"
-      );
       if (activeGame) {
-        router.push(`/GameScreen/${activeGame.gameId.toString()}`);
+        // Verify live status from the contract — local store may be stale
+        try {
+          const freshGame = await getGameInfo(activeGame.gameId);
+          const isOver =
+            freshGame.status === GameStatus.Ended ||
+            freshGame.status === GameStatus.Cancelled;
+          if (isOver) {
+            // Game actually ended — sync the store and let creation proceed
+            updateGameStatus(freshGame.gameId, freshGame.status);
+          } else {
+            showErrorToast(
+              `You have an active game (#${activeGame.gameId}). Please complete it first.`,
+              "Active Game"
+            );
+            router.push(`/GameScreen/${activeGame.gameId.toString()}`);
+            onClose();
+            return;
+          }
+        } catch {
+          // If the contract read fails, fall through and let the tx itself revert
+        }
       }
-      onClose();
-      return;
     }
 
     try {

@@ -95,35 +95,49 @@ export async function getTotalGames(): Promise<bigint> {
 }
 
 export async function getGameInfo(gameId: bigint): Promise<GameInfo> {
-  const game = await publicClient.readContract({
-    address: CONTRACT_ADDRESS,
-    abi: BREEVS_ABI,
-    functionName: "getGame",
-    args: [gameId],
-  }) as {
-    creator: string;
-    players: string[];
-    stake: bigint;
-    prizePool: bigint;
-    status: number;
-    roundDuration: bigint;
-    roundEnd: bigint;
-    currentRound: bigint;
-    winner: string;
-    totalRounds: bigint;
-  };
+  // Fetch game struct + active players in parallel
+  // getGame().players includes ALL players (never shrinks); getActivePlayers() is the live count
+  const [game, activePlayers] = await Promise.all([
+    publicClient.readContract({
+      address: CONTRACT_ADDRESS,
+      abi: BREEVS_ABI,
+      functionName: "getGame",
+      args: [gameId],
+    }) as Promise<{
+      creator: string;
+      players: string[];
+      stake: bigint;
+      prizePool: bigint;
+      status: number;
+      roundDuration: bigint;
+      roundEnd: bigint;
+      currentRound: bigint;
+      winner: string;
+      totalRounds: bigint;
+    }>,
+    publicClient.readContract({
+      address: CONTRACT_ADDRESS,
+      abi: BREEVS_ABI,
+      functionName: "getActivePlayers",
+      args: [gameId],
+    }).catch(() => null) as Promise<string[] | null>,
+  ]);
 
   const status = Number(game.status) as GameStatus;
   const winnerAddr = game.winner === "0x0000000000000000000000000000000000000000" ? null : game.winner;
+  // playerCount = currently active (non-eliminated) players; fall back to total if fetch failed
+  const playerCount = activePlayers !== null ? activePlayers.length : game.players.length;
 
   return {
     gameId,
     creator: game.creator,
     stake: game.stake,
     prizePool: game.prizePool,
-    players: game.players,
-    eliminatedPlayers: [],
-    playerCount: game.players.length,
+    players: game.players,       // full list (all who ever joined) — used to build player registry
+    eliminatedPlayers: activePlayers !== null
+      ? game.players.filter((p) => !activePlayers.map((a) => a.toLowerCase()).includes(p.toLowerCase()))
+      : [],
+    playerCount,                 // ← NOW reflects active (non-eliminated) count
     currentRound: Number(game.currentRound),
     roundEnd: game.roundEnd,
     roundDuration: game.roundDuration,
@@ -203,6 +217,17 @@ export async function isGameCreator(
 ): Promise<boolean> {
   const game = await getGameInfo(gameId);
   return game.creator.toLowerCase() === user.toLowerCase();
+}
+
+/** Returns only non-eliminated (active) player addresses for a game. */
+export async function getActivePlayers(gameId: bigint): Promise<string[]> {
+  const result = await publicClient.readContract({
+    address: CONTRACT_ADDRESS,
+    abi: BREEVS_ABI,
+    functionName: "getActivePlayers",
+    args: [gameId],
+  });
+  return result as string[];
 }
 
 export async function getPendingSpin(gameId: bigint): Promise<SpinRequest> {
