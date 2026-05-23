@@ -13,7 +13,7 @@ import {
   showSuccessToast,
   showTransactionToast,
 } from "@/component/Toast";
-import { GameStatus, MIN_STAKE } from "@/lib/contractCalls";
+import { GameStatus, MIN_STAKE, getGameInfo } from "@/lib/contractCalls";
 import { formatEther } from "viem";
 
 interface StakeModalProps {
@@ -33,6 +33,7 @@ const StakeModal: React.FC<StakeModalProps> = ({ isOpen, onClose, onSuccess }) =
     setCurrentPlayerGame,
     hasActiveGame,
     getCurrentActiveGame,
+    updateGameStatus,
     addToMyGames,
   } = useGameStore();
   const [txId, setTxId] = useState<string | null>(null);
@@ -65,12 +66,26 @@ const StakeModal: React.FC<StakeModalProps> = ({ isOpen, onClose, onSuccess }) =
       const hasActive = hasActiveGame(address);
       const activeGame = getCurrentActiveGame(address);
       if (hasActive && activeGame && activeGame.gameId !== gameId) {
-        showErrorToast(
-          `You are already in an active game (#${activeGame.gameId}). Please complete it first.`,
-          "Active Game"
-        );
-        router.push(`/GameScreen/${activeGame.gameId.toString()}`);
-        return;
+        // Verify live status from the contract — local store may be stale
+        try {
+          const freshGame = await getGameInfo(activeGame.gameId);
+          const isOver =
+            freshGame.status === GameStatus.Ended ||
+            freshGame.status === GameStatus.Cancelled;
+          if (isOver) {
+            // Game actually ended — sync the store and let join proceed
+            updateGameStatus(freshGame.gameId, freshGame.status);
+          } else {
+            showErrorToast(
+              `You are already in an active game (#${activeGame.gameId}). Please complete it first.`,
+              "Active Game"
+            );
+            router.push(`/GameScreen/${activeGame.gameId.toString()}`);
+            return;
+          }
+        } catch {
+          // If contract read fails, fall through and let the tx itself revert
+        }
       }
 
       const tx = await joinGameMutation({ gameId, stake: stake > 0n ? stake : MIN_STAKE });
