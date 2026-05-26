@@ -1,11 +1,15 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import BackgroundImgBlur from "@/component/BackgroundBlur";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { getUserStats, getAllGameIds, getGameInfo } from "@/lib/contractCalls";
 import { Open_Sans } from "next/font/google";
 import { formatEther } from "viem";
+import { RefreshCw, Trophy, Swords, Coins, Percent, Clock } from "lucide-react";
+import BackgroundImgBlur from "@/component/BackgroundBlur";
+import Mascot from "@/assets/RR_LOGO_1.png";
+import RRLogo from "@/assets/RR_LOGO_2_1.png";
 
 const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "700"] });
 
@@ -15,324 +19,463 @@ interface PlayerStats {
   gamesWon: number;
   totalWinnings: bigint;
   totalStaked: bigint;
-  winPercentage: number;
-  image?: string;
+  winRate: number;
 }
 
-const PlayersList: React.FC = () => {
-  const [players, setPlayers] = useState<PlayerStats[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+// ── Cache helpers (localStorage, 5-min TTL) ───────────────────────────────────
+const CACHE_KEY = "breevs_leaderboard_v2";
+const CACHE_TTL = 5 * 60 * 1000;
+
+interface CacheEntry {
+  players: { address: string; gamesPlayed: number; gamesWon: number; totalWinnings: string; totalStaked: string; winRate: number }[];
+  timestamp: number;
+}
+
+function readCache(): { players: PlayerStats[]; ageMs: number } | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const { players, timestamp }: CacheEntry = JSON.parse(raw);
+    const ageMs = Date.now() - timestamp;
+    if (ageMs > CACHE_TTL) return null;
+    return {
+      ageMs,
+      players: players.map((p) => ({
+        ...p,
+        totalWinnings: BigInt(p.totalWinnings),
+        totalStaked:   BigInt(p.totalStaked),
+      })),
+    };
+  } catch { return null; }
+}
+
+function writeCache(players: PlayerStats[]) {
+  try {
+    const entry: CacheEntry = {
+      timestamp: Date.now(),
+      players: players.map((p) => ({
+        ...p,
+        totalWinnings: p.totalWinnings.toString(),
+        totalStaked:   p.totalStaked.toString(),
+      })),
+    };
+    localStorage.setItem(CACHE_KEY, JSON.stringify(entry));
+  } catch { /* quota exceeded — ignore */ }
+}
+
+type SortKey = "winrate" | "winnings" | "games";
+
+const SORT_OPTS: { key: SortKey; label: string; icon: React.ReactNode }[] = [
+  { key: "winrate",  label: "Survival Rate", icon: <Percent  className="w-3.5 h-3.5" /> },
+  { key: "winnings", label: "CELO Earned",   icon: <Coins    className="w-3.5 h-3.5" /> },
+  { key: "games",    label: "Matches",        icon: <Swords   className="w-3.5 h-3.5" /> },
+];
+
+const fmt    = (v: bigint) => parseFloat(formatEther(v)).toFixed(2);
+const short  = (a: string) => `${a.slice(0, 8)}…${a.slice(-6)}`;
+const shortS = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+const init   = (a: string) => a.slice(2, 4).toUpperCase();
+
+const rankText  = (r: number) => r === 1 ? "text-yellow-400" : r === 2 ? "text-slate-300" : r === 3 ? "text-orange-400" : "text-gray-600";
+const rankBg    = (r: number) => r === 1 ? "border-yellow-400/40 bg-yellow-950/20" : r === 2 ? "border-slate-400/30 bg-slate-800/20" : r === 3 ? "border-orange-500/30 bg-orange-950/20" : "border-white/5 bg-white/[0.02]";
+const rankBorder= (r: number) => r === 1 ? "border-yellow-400/50" : r === 2 ? "border-slate-300/40" : r === 3 ? "border-orange-400/40" : "border-white/10";
+const MEDALS    = ["🥇","🥈","🥉"];
+
+export default function LeaderboardPage() {
+  const [players,    setPlayers]    = useState<PlayerStats[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState<string | null>(null);
+  const [sort,       setSort]       = useState<SortKey>("winrate");
+  const [refreshing, setRefreshing] = useState(false);
+  const [cacheAgeMs, setCacheAgeMs] = useState<number | null>(null);
 
   useEffect(() => {
-    fetchLeaderboard();
+    // Try to load from cache immediately (no spinner)
+    const cached = readCache();
+    if (cached) {
+      setPlayers(cached.players);
+      setCacheAgeMs(cached.ageMs);
+      setLoading(false);
+    } else {
+      load(false);
+    }
   }, []);
 
-  const fetchLeaderboard = async () => {
+  const load = async (isRefresh = false) => {
     try {
-      setIsLoading(true);
+      isRefresh ? setRefreshing(true) : setLoading(true);
       setError(null);
-
-      // Get all game IDs
       const gameIds = await getAllGameIds();
-      const uniquePlayersMap = new Map<string, PlayerStats>();
+      const map = new Map<string, PlayerStats>();
 
-      // Collect all unique players from all games
-      for (const gameId of gameIds) {
+      for (const id of gameIds) {
         try {
-          const gameInfo = await getGameInfo(gameId);
-
-          // Add all players from this game
-          for (const playerAddress of gameInfo.players) {
-            if (!uniquePlayersMap.has(playerAddress)) {
-              // Fetch user stats from contract
-              const stats = await getUserStats(playerAddress);
-
-              const winPercentage =
-                stats.gamesPlayed > 0
-                  ? (stats.gamesWon / stats.gamesPlayed) * 100
-                  : 0;
-
-              uniquePlayersMap.set(playerAddress, {
-                address: playerAddress,
-                gamesPlayed: stats.gamesPlayed,
-                gamesWon: stats.gamesWon,
-                totalWinnings: stats.totalWinnings,
-                totalStaked: stats.totalStaked,
-                winPercentage,
-                image: `/images/player-${playerAddress.slice(-4)}.jpg`,
-              });
-            }
+          const info = await getGameInfo(id);
+          for (const addr of info.players) {
+            if (map.has(addr)) continue;
+            const s = await getUserStats(addr);
+            map.set(addr, {
+              address:       addr,
+              gamesPlayed:   s.gamesPlayed,
+              gamesWon:      s.gamesWon,
+              totalWinnings: s.totalWinnings,
+              totalStaked:   s.totalStaked,
+              winRate: s.gamesPlayed > 0 ? (s.gamesWon / s.gamesPlayed) * 100 : 0,
+            });
           }
-        } catch (err) {
-          console.warn(`Failed to fetch game ${gameId}:`, err);
-        }
+        } catch { /* skip bad game */ }
       }
-
-      const rankedPlayers = Array.from(uniquePlayersMap.values()).sort(
-        (a, b) => {
-          if (b.winPercentage !== a.winPercentage) {
-            return b.winPercentage - a.winPercentage;
-          }
-          return Number(b.totalWinnings - a.totalWinnings);
-        }
-      );
-
-      setPlayers(rankedPlayers);
-    } catch (err) {
-      console.error("Failed to fetch leaderboard:", err);
-      setError("Failed to load leaderboard. Please try again later.");
+      const freshPlayers = Array.from(map.values());
+      setPlayers(freshPlayers);
+      writeCache(freshPlayers);
+      setCacheAgeMs(0);
+    } catch {
+      setError("Could not load leaderboard.");
     } finally {
-      setIsLoading(false);
+      setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const getRankBadge = (rank: number) => {
-    if (rank === 1) return "🥇";
-    if (rank === 2) return "🥈";
-    if (rank === 3) return "🥉";
-    return rank;
-  };
+  const sorted = [...players].sort((a, b) => {
+    if (sort === "winrate")  return b.winRate - a.winRate || Number(b.totalWinnings - a.totalWinnings);
+    if (sort === "winnings") return Number(b.totalWinnings - a.totalWinnings);
+    return b.gamesPlayed - a.gamesPlayed;
+  });
 
-  const getRankColor = (rank: number) => {
-    if (rank === 1) return "text-yellow-400";
-    if (rank === 2) return "text-gray-300";
-    if (rank === 3) return "text-orange-400";
-    return "text-white";
-  };
+  const top3 = sorted.slice(0, 3);
 
-  const formatCelo = (amount: bigint) => {
-    return parseFloat(formatEther(amount)).toFixed(2);
-  };
+  const cacheLabel = (() => {
+    if (cacheAgeMs === null) return null;
+    if (cacheAgeMs < 60000) return "just now";
+    return `${Math.floor(cacheAgeMs / 60000)}m ago`;
+  })();
 
-  if (isLoading) {
-    return (
-      <BackgroundImgBlur>
-        <div
-          className={`${openSans.className} w-full min-h-screen flex flex-col items-center p-4 sm:p-8 lg:p-16`}
-        >
-          {/* Header */}
-          <div className="w-full max-w-6xl bg-gradient-to-r from-[#030b1f] via-[#0a1529] to-[#030b1f] border-b border-red-500/20 rounded-t-2xl p-6 sticky top-0 z-50 backdrop-blur-md">
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-center">
-              <span className="text-white">Best Players </span>
-              <span className="text-[#FF3B3B]">Rankings</span>
-            </h1>
-            <p className="text-sm text-gray-400 text-center mt-2">
-              Top performers across all games
-            </p>
-          </div>
-
-          {/* Loading State */}
-          <div className="w-full max-w-6xl flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-500 mb-4"></div>
-              <p className="text-white text-lg">Loading leaderboard...</p>
-            </div>
-          </div>
-        </div>
-      </BackgroundImgBlur>
-    );
-  }
-
-  if (error) {
-    return (
-      <BackgroundImgBlur>
-        <div
-          className={`${openSans.className} w-full min-h-screen flex flex-col items-center justify-center p-4`}
-        >
-          <div className="bg-gradient-to-br from-[#030b1f]/90 to-[#0a1529]/90 backdrop-blur-md rounded-2xl border border-red-500/20 p-8 max-w-md">
-            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg
-                className="w-8 h-8 text-red-500"
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-            </div>
-            <h3 className="text-xl font-bold text-white mb-2 text-center">
-              Error
-            </h3>
-            <p className="text-gray-400 text-center mb-4">{error}</p>
-            <button
-              onClick={fetchLeaderboard}
-              className="w-full bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white font-bold py-3 px-6 rounded-xl transition-all"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      </BackgroundImgBlur>
-    );
-  }
-
-  if (players.length === 0) {
-    return (
-      <BackgroundImgBlur>
-        <div
-          className={`${openSans.className} w-full min-h-screen flex flex-col items-center p-4 sm:p-8 lg:p-16`}
-        >
-          {/* Header */}
-          <div className="w-full max-w-6xl bg-gradient-to-r from-[#030b1f] via-[#0a1529] to-[#030b1f] border-b border-red-500/20 rounded-t-2xl p-6 sticky top-0 z-50 backdrop-blur-md">
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-center">
-              <span className="text-white">Best Players </span>
-              <span className="text-[#FF3B3B]">Rankings</span>
-            </h1>
-          </div>
-
-          {/* Empty State */}
-          <div className="w-full max-w-6xl flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className="w-20 h-20 bg-gray-700/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg
-                  className="w-10 h-10 text-gray-500"
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
-                </svg>
-              </div>
-              <h3 className="text-xl font-bold text-white mb-2">
-                No Players Yet
-              </h3>
-              <p className="text-gray-400">Be the first to join a game!</p>
-            </div>
-          </div>
-        </div>
-      </BackgroundImgBlur>
-    );
-  }
-
-  return (
+  /* ── Loading (first paint, no cache) ── */
+  if (loading) return (
     <BackgroundImgBlur>
-      <div
-        className={`${openSans.className} w-full min-h-screen flex flex-col items-center p-4 sm:p-8 lg:p-16`}
-      >
-        {/* Sticky Header */}
-        <div className="w-full max-w-6xl bg-gradient-to-r from-[#030b1f] via-[#0a1529] to-[#030b1f] border-b border-red-500/20 rounded-t-2xl p-6 sticky top-0 z-50 backdrop-blur-md shadow-xl">
-          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-center">
-            <span className="text-white">Best Players </span>
-            <span className="text-[#FF3B3B]">Rankings</span>
-          </h1>
-          <p className="text-sm text-gray-400 text-center mt-2">
-            Top performers across all games • {players.length} players competing
-          </p>
-        </div>
-
-        {/* Scrollable Table Container */}
-        <div className="w-full max-w-6xl flex-1 overflow-y-auto bg-gradient-to-b from-[#030b1f]/50 to-transparent rounded-b-2xl">
-          <div className="p-4 sm:p-6">
-            <AnimatePresence>
-              {players.map((player, index) => (
-                <motion.div
-                  key={player.address}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  className="mb-4"
-                >
-                  <div className="bg-gradient-to-br from-[#191F57]/90 to-[#0a1529]/90 backdrop-blur-md border border-gray-700/50 rounded-xl p-4 sm:p-5 hover:border-red-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-red-500/20">
-                    <div className="flex items-center gap-4">
-                      {/* Rank */}
-                      <div
-                        className={`flex-shrink-0 w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-white/5 border-2 ${
-                          index === 0
-                            ? "border-yellow-400"
-                            : index === 1
-                            ? "border-gray-300"
-                            : index === 2
-                            ? "border-orange-400"
-                            : "border-gray-700"
-                        } flex items-center justify-center`}
-                      >
-                        <span
-                          className={`text-lg sm:text-2xl font-bold ${getRankColor(
-                            index + 1
-                          )}`}
-                        >
-                          {getRankBadge(index + 1)}
-                        </span>
-                      </div>
-
-                      {/* Player Avatar */}
-                      <div className="flex-shrink-0 hidden sm:flex w-12 h-12 rounded-full border-2 border-red-500/30 bg-gradient-to-br from-red-900/60 to-[#030B1F] items-center justify-center">
-                        <span className="text-lg font-bold text-red-400">
-                          {player.address.slice(2, 4).toUpperCase()}
-                        </span>
-                      </div>
-
-                      {/* Player Info */}
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-white text-sm sm:text-base truncate font-mono">
-                          {player.address.slice(0, 8)}...
-                          {player.address.slice(-6)}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2 mt-1">
-                          <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full border border-green-500/30">
-                            {player.winPercentage.toFixed(1)}% Win Rate
-                          </span>
-                          <span className="text-xs text-gray-400">
-                            {formatCelo(player.totalWinnings)} CELO won
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Stats */}
-                      <div className="flex-shrink-0 text-right">
-                        <div className="grid grid-cols-2 gap-3 text-xs">
-                          <div className="bg-white/5 rounded-lg p-2 min-w-[60px]">
-                            <p className="text-gray-400">Played</p>
-                            <p className="text-white font-bold text-sm">
-                              {player.gamesPlayed}
-                            </p>
-                          </div>
-                          <div className="bg-white/5 rounded-lg p-2 min-w-[60px]">
-                            <p className="text-gray-400">Wins</p>
-                            <p className="text-green-400 font-bold text-sm">
-                              {player.gamesWon}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
+      <div className={`${openSans.className} min-h-screen flex flex-col`}>
+        <Header onRefresh={() => load(true)} refreshing={false} total={undefined} cacheLabel={null} />
+        <div className="flex-1 flex items-center justify-center gap-8 px-6">
+          <Image src={Mascot} alt="" width={100} height={100} className="opacity-20 animate-pulse hidden sm:block" />
+          <div>
+            <p className="text-white font-bold text-xl mb-1">Scanning the battlefield…</p>
+            <p className="text-gray-600 text-sm">Reading all game records on-chain</p>
+            <div className="mt-4 h-0.5 w-56 bg-white/5 rounded overflow-hidden">
+              <motion.div
+                className="h-full bg-red-600 rounded"
+                animate={{ x: ["-100%", "200%"] }}
+                transition={{ repeat: Infinity, duration: 1.4, ease: "easeInOut" }}
+              />
+            </div>
           </div>
-        </div>
-
-        {/* Refresh Button */}
-        <div className="w-full max-w-6xl mt-4 mb-10 md:mb-20 lg:mb-0">
-          <button
-            onClick={fetchLeaderboard}
-            className="w-full bg-gradient-to-r from-gray-800 to-gray-700 hover:from-gray-700 hover:to-gray-600 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 flex items-center justify-center gap-2"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
-            Refresh Leaderboard
-          </button>
         </div>
       </div>
     </BackgroundImgBlur>
   );
-};
 
-export default PlayersList;
+  if (error) return (
+    <BackgroundImgBlur>
+      <div className={`${openSans.className} min-h-screen flex flex-col`}>
+        <Header onRefresh={() => load(true)} refreshing={false} total={undefined} cacheLabel={null} />
+        <div className="flex-1 flex items-center justify-center px-4">
+          <div className="text-center max-w-xs">
+            <p className="text-5xl mb-4">💀</p>
+            <p className="text-white font-bold mb-2">{error}</p>
+            <button onClick={() => load()} className="mt-4 px-6 py-2 bg-red-700 hover:bg-red-600 text-white text-sm font-bold rounded-xl transition-all">
+              Try Again
+            </button>
+          </div>
+        </div>
+      </div>
+    </BackgroundImgBlur>
+  );
+
+  return (
+    <BackgroundImgBlur>
+      <div className={`${openSans.className} min-h-screen pb-24`}>
+
+        <Header onRefresh={() => load(true)} refreshing={refreshing} total={players.length} cacheLabel={cacheLabel} />
+
+        {/* ── Desktop two-column / mobile single-column ── */}
+        <div className="max-w-screen-xl mx-auto px-4 pt-6 flex gap-6 items-start">
+
+          {/* ══════════════════════════════
+              LEFT — ranked list (grows)
+          ══════════════════════════════ */}
+          <div className="flex-1 min-w-0 space-y-4">
+
+            {/* Sort tabs */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {SORT_OPTS.map(({ key, label, icon }) => (
+                <button
+                  key={key}
+                  onClick={() => setSort(key)}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border transition-all duration-200 ${
+                    sort === key
+                      ? "bg-red-600 border-red-600 text-white shadow-lg shadow-red-900/30"
+                      : "bg-white/3 border-white/8 text-gray-500 hover:text-white hover:border-white/20"
+                  }`}
+                >
+                  {icon} {label}
+                </button>
+              ))}
+
+              {/* Refresh spinner inline with tabs while refreshing */}
+              {refreshing && (
+                <div className="flex items-center gap-1.5 text-gray-600 text-xs ml-auto">
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  <span>Updating…</span>
+                </div>
+              )}
+            </div>
+
+            {/* Column headers */}
+            <div className="grid grid-cols-[2rem_1fr_auto] sm:grid-cols-[2.5rem_2fr_1fr_1fr_1fr] gap-3 px-4 pb-1 border-b border-white/5">
+              <span className="text-[10px] text-gray-700 uppercase tracking-widest">#</span>
+              <span className="text-[10px] text-gray-700 uppercase tracking-widest">Player</span>
+              <span className="hidden sm:block text-[10px] text-gray-700 uppercase tracking-widest text-right">Survival</span>
+              <span className="hidden sm:block text-[10px] text-gray-700 uppercase tracking-widest text-right">W / G</span>
+              <span className="text-[10px] text-gray-700 uppercase tracking-widest text-right">
+                {sort === "winnings" ? "CELO" : sort === "games" ? "Matches" : "Rate"}
+              </span>
+            </div>
+
+            {/* Rows */}
+            <div className="space-y-1.5">
+              <AnimatePresence mode="wait">
+                {sorted.map((p, i) => {
+                  const rank   = i + 1;
+                  const inTop3 = rank <= 3;
+
+                  const stat =
+                    sort === "winrate"  ? `${p.winRate.toFixed(1)}%`
+                  : sort === "winnings" ? `${fmt(p.totalWinnings)} ₵`
+                  : String(p.gamesPlayed);
+
+                  return (
+                    <motion.div
+                      key={p.address + sort}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ delay: Math.min(i * 0.02, 0.35) }}
+                      className={`grid grid-cols-[2rem_1fr_auto] sm:grid-cols-[2.5rem_2fr_1fr_1fr_1fr] items-center gap-3 px-4 py-3 rounded-xl border transition-colors duration-200 ${rankBg(rank)}`}
+                    >
+                      {/* Rank */}
+                      <span className={`text-sm font-black text-center ${rankText(rank)}`}>
+                        {inTop3 ? MEDALS[rank - 1] : rank}
+                      </span>
+
+                      {/* Player */}
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className={`w-8 h-8 rounded-full border flex-shrink-0 flex items-center justify-center text-xs font-black ${rankBorder(rank)} ${rankText(rank)}`}
+                          style={{ background: "linear-gradient(135deg,#0d0d1a,#050508)" }}
+                        >
+                          {init(p.address)}
+                        </div>
+                        <div className="min-w-0">
+                          <p className={`text-sm font-bold font-mono truncate ${inTop3 ? "text-white" : "text-gray-400"}`}>
+                            <span className="hidden md:inline">{short(p.address)}</span>
+                            <span className="md:hidden">{shortS(p.address)}</span>
+                          </p>
+                          <p className="sm:hidden text-[10px] text-gray-600 mt-0.5">
+                            {p.gamesWon}W · {p.gamesPlayed}G
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Survival bar — desktop only */}
+                      <div className="hidden sm:flex items-center gap-2 justify-end">
+                        <div className="w-16 h-1 bg-white/5 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${rank === 1 ? "bg-yellow-400" : rank === 2 ? "bg-slate-300" : rank === 3 ? "bg-orange-400" : "bg-red-700/60"}`}
+                            style={{ width: `${Math.min(p.winRate, 100)}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-gray-500 w-10 text-right">{p.winRate.toFixed(0)}%</span>
+                      </div>
+
+                      {/* W/G — desktop only */}
+                      <p className="hidden sm:block text-xs text-gray-500 text-right">
+                        {p.gamesWon}<span className="text-gray-700">/{p.gamesPlayed}</span>
+                      </p>
+
+                      {/* Primary stat */}
+                      <p className={`text-sm font-black text-right ${inTop3 ? rankText(rank) : "text-gray-400"}`}>
+                        {stat}
+                      </p>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+
+              {sorted.length === 0 && (
+                <div className="text-center py-20">
+                  <p className="text-3xl mb-3">🎰</p>
+                  <p className="text-gray-600 text-sm">No players on record yet.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ══════════════════════════════
+              RIGHT — sticky spotlight sidebar (desktop only)
+          ══════════════════════════════ */}
+          <aside className="hidden lg:flex flex-col gap-4 w-72 xl:w-80 shrink-0 sticky top-24 self-start">
+
+            {/* Mascot + branding */}
+            <div
+              className="relative rounded-2xl overflow-hidden border border-white/5 p-5"
+              style={{ background: "linear-gradient(160deg,#120308 0%,#06020a 100%)" }}
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_0%,rgba(220,38,38,0.08),transparent_60%)] pointer-events-none" />
+              <div className="h-px w-full bg-gradient-to-r from-transparent via-red-700/40 to-transparent absolute top-0 left-0" />
+
+              <div className="relative flex items-end gap-4">
+                <Image src={Mascot} alt="" width={80} height={90} className="object-contain opacity-90 drop-shadow-2xl" />
+                <div>
+                  <div className="relative w-24 h-12 mb-1">
+                    <Image src={RRLogo} alt="Russian Roulette" fill className="object-contain object-left" />
+                  </div>
+                  <p className="text-[10px] text-gray-600 uppercase tracking-widest">Kill Board</p>
+                  <p className="text-[10px] text-gray-700">{players.length} players</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Top 3 Spotlight */}
+            {top3.length > 0 && (
+              <div className="rounded-2xl border border-white/5 overflow-hidden" style={{ background: "#07070f" }}>
+                <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2">
+                  <Trophy className="w-3.5 h-3.5 text-yellow-400" />
+                  <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">Top Survivors</span>
+                </div>
+
+                {top3.map((p, i) => {
+                  const rank = i + 1;
+                  return (
+                    <div
+                      key={p.address}
+                      className={`flex items-center gap-3 px-4 py-3.5 ${i < top3.length - 1 ? "border-b border-white/[0.04]" : ""}`}
+                    >
+                      <div className="relative shrink-0">
+                        {rank === 1 && (
+                          <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-base">👑</span>
+                        )}
+                        <div
+                          className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-xs font-black mt-1 ${rankBorder(rank)} ${rankText(rank)}`}
+                          style={{ background: "linear-gradient(135deg,#0f0f20,#060610)" }}
+                        >
+                          {init(p.address)}
+                        </div>
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className="text-base leading-none">{MEDALS[i]}</span>
+                          <p className={`text-xs font-bold font-mono truncate ${rankText(rank)}`}>
+                            {shortS(p.address)}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-0.5 bg-white/5 rounded overflow-hidden">
+                            <div
+                              className={`h-full rounded ${rank === 1 ? "bg-yellow-400" : rank === 2 ? "bg-slate-300" : "bg-orange-400"}`}
+                              style={{ width: `${Math.min(p.winRate, 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-gray-600 shrink-0">{p.winRate.toFixed(0)}%</span>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <p className={`text-sm font-black ${rankText(rank)}`}>{fmt(p.totalWinnings)}</p>
+                        <p className="text-[9px] text-gray-700">CELO</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Stats summary */}
+            {players.length > 0 && (
+              <div className="rounded-2xl border border-white/5 overflow-hidden" style={{ background: "#07070f" }}>
+                <div className="px-4 py-3 border-b border-white/5">
+                  <span className="text-[10px] text-gray-600 uppercase tracking-widest">Board Stats</span>
+                </div>
+                {[
+                  { label: "Total Players",  value: players.length },
+                  { label: "Total Winners",  value: players.filter(p => p.gamesWon > 0).length },
+                  { label: "Most Matches",   value: `${Math.max(...players.map(p => p.gamesPlayed))}G` },
+                  { label: "Top Win Rate",   value: `${(Math.max(...players.map(p => p.winRate))).toFixed(0)}%` },
+                ].map((s, i, arr) => (
+                  <div key={s.label} className={`flex items-center justify-between px-4 py-3 ${i < arr.length - 1 ? "border-b border-white/[0.04]" : ""}`}>
+                    <span className="text-xs text-gray-500">{s.label}</span>
+                    <span className="text-sm font-black text-white">{s.value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </aside>
+
+        </div>
+      </div>
+    </BackgroundImgBlur>
+  );
+}
+
+/* ── Sticky header ─────────────────────────────────────────────── */
+function Header({
+  onRefresh,
+  refreshing,
+  total,
+  cacheLabel,
+}: {
+  onRefresh: () => void;
+  refreshing: boolean;
+  total: number | undefined;
+  cacheLabel: string | null;
+}) {
+  return (
+    <div className="sticky top-0 z-40 bg-[#030B1F]/90 backdrop-blur-md border-b border-white/5">
+      <div className="max-w-screen-xl mx-auto px-4 py-3 flex items-center gap-4">
+        <div className="relative w-20 h-10 shrink-0 hidden sm:block">
+          <Image src={RRLogo} alt="Russian Roulette" fill className="object-contain object-left" />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base font-black text-white leading-none tracking-tight flex items-center gap-2">
+            <Trophy className="w-4 h-4 text-yellow-400 shrink-0" />
+            Kill Board
+          </h1>
+          <div className="flex items-center gap-2 mt-0.5">
+            {total !== undefined ? (
+              <p className="text-[10px] text-gray-600">{total} players · all-time rankings</p>
+            ) : (
+              <p className="text-[10px] text-gray-600">All-time player rankings</p>
+            )}
+            {cacheLabel && (
+              <div className="flex items-center gap-1 text-[10px] text-gray-700">
+                <Clock className="w-2.5 h-2.5" />
+                <span>cached {cacheLabel}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/4 hover:bg-white/8 border border-white/8 text-gray-500 hover:text-white text-xs font-bold transition-all disabled:opacity-30"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+          <span className="hidden sm:inline">Refresh</span>
+        </button>
+      </div>
+    </div>
+  );
+}

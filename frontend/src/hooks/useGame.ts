@@ -221,10 +221,10 @@ export function useGameStatus(gameId?: bigint): UseQueryResult<GameInfo, Error> 
     },
     refetchInterval: (q) =>
       q.state.data?.status === GameStatus.InProgress ? 5000 : 15000,
-    refetchOnWindowFocus: (q) => q.state.data?.status !== GameStatus.Ended,
+    refetchOnWindowFocus: true,
     enabled: !!gameId,
     retry: 2,
-    staleTime: 60_000,
+    staleTime: 0,
   });
 
   useEffect(() => {
