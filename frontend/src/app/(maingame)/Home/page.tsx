@@ -51,7 +51,13 @@ export default function HomePage() {
   const filteredActiveGames = activeGames
     .filter((game) => {
       const stakeInCelo = Number(game.stake) / 1e18;
-      return stakeInCelo >= Number(filters.minStake) && game.status === filters.status;
+      const stakeOk = stakeInCelo >= Number(filters.minStake);
+      // Show both Active and InProgress games unless a specific status filter is applied
+      const statusOk =
+        filters.status === GameStatus.Active
+          ? game.status === GameStatus.Active || game.status === GameStatus.InProgress
+          : game.status === filters.status;
+      return stakeOk && statusOk;
     })
     .sort(() => {
       if (filters.sortBy === "newest") return filters.sortOrder === "desc" ? -1 : 1;

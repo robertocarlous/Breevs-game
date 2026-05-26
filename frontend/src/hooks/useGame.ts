@@ -121,10 +121,11 @@ export function useAllGames(page: number = 1, pageSize: number = 10) {
     queryKey: ["allGames", page],
     queryFn: async () => {
       const totalGames = await getTotalGames();
-      const start = BigInt((page - 1) * pageSize + 1);
-      const end = BigInt(Math.min(Number(totalGames), page * pageSize));
+      // Scan newest → oldest so the most recent games appear first
+      const end = totalGames;
+      const start = totalGames > BigInt(pageSize) ? totalGames - BigInt(pageSize) + 1n : 1n;
       const games: GameInfo[] = [];
-      for (let i = start; i <= end; i++) {
+      for (let i = end; i >= start; i--) {
         try {
           const game = await getGameInfo(i);
           games.push(game);
@@ -134,47 +135,39 @@ export function useAllGames(page: number = 1, pageSize: number = 10) {
       }
       return games;
     },
-    staleTime: 60000,
-    refetchOnWindowFocus: false,
+    staleTime: 0,
+    refetchInterval: 15000,
+    refetchOnWindowFocus: true,
   });
 }
 
-export function useActiveGames(page: number = 1, pageSize: number = 10) {
+export function useActiveGames(page: number = 1) {
   const { setActiveGames } = useGameStore();
   const queryClient = useQueryClient();
   const query = useQuery<GameInfo[], Error>({
     queryKey: ["activeGames", page],
     queryFn: async () => {
-      const allGamesQueryKey = ["allGames", page];
-      let allGames = queryClient.getQueryData<GameInfo[]>(allGamesQueryKey);
-      if (!allGames) {
-        allGames = await queryClient.fetchQuery({
-          queryKey: allGamesQueryKey,
-          queryFn: async () => {
-            const totalGames = await getTotalGames();
-            const start = BigInt((page - 1) * pageSize + 1);
-            const end = BigInt(Math.min(Number(totalGames), page * pageSize));
-            const games: GameInfo[] = [];
-            for (let i = start; i <= end; i++) {
-              try {
-                const game = await getGameInfo(i);
-                games.push(game);
-              } catch (error) {
-                console.warn(`Skipping game ${i}:`, error);
-              }
-            }
-            return games;
-          },
-        });
+      const totalGames = await getTotalGames();
+      // Scan ALL games newest → oldest to never miss a newly created game
+      const games: GameInfo[] = [];
+      for (let i = totalGames; i >= 1n; i--) {
+        try {
+          const game = await getGameInfo(i);
+          games.push(game);
+        } catch (error) {
+          console.warn(`Skipping game ${i}:`, error);
+        }
       }
-      if (!allGames) return [];
-      return allGames.filter(
+      // Update allGames cache as a side-effect
+      queryClient.setQueryData(["allGames", page], games);
+      return games.filter(
         (g: GameInfo) =>
           g.status === GameStatus.Active || g.status === GameStatus.InProgress
       );
     },
-    staleTime: 60000,
-    refetchOnWindowFocus: false,
+    staleTime: 0,
+    refetchInterval: 15000,
+    refetchOnWindowFocus: true,
   });
 
   useEffect(() => {
