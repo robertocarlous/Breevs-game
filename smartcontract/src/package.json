@@ -8,11 +8,16 @@
     "deploy:local": "hardhat run scripts/deploy.cjs --network hardhat",
     "deploy:sepolia": "hardhat run scripts/deploy.cjs --network celo-sepolia",
     "deploy:mainnet": "hardhat run scripts/deploy.cjs --network celo-mainnet",
+    "upgrade:local": "hardhat run scripts/upgrade.cjs --network hardhat",
+    "upgrade:sepolia": "hardhat run scripts/upgrade.cjs --network celo-sepolia",
+    "upgrade:mainnet": "hardhat run scripts/upgrade.cjs --network celo-mainnet",
     "verify:sourcify": "node scripts/verify-sourcify.cjs",
     "test": "hardhat test"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts-upgradeable": "^5.0.2",
+    "@openzeppelin/hardhat-upgrades": "^3.9.0",
     "dotenv": "^16.0.0",
     "hardhat": "^2.22.0"
   }

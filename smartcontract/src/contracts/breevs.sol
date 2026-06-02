@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.22;
+
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 /**
- * @title Breevs Russian Roulette – Commit-Reveal Edition
+ * @title Breevs Russian Roulette – Commit-Reveal Edition (UUPS Upgradeable)
  * @notice Russian-roulette elimination game using a two-step commit/reveal
  *         randomness pattern for fair, unmanipulable outcomes on Celo.
+ *
+ * DEPLOYMENT
+ * ──────────
+ * Deploy via ERC-1967 UUPS proxy. Users interact with the proxy address;
+ * upgrades replace the implementation while preserving game state.
  *
  * HOW RANDOMNESS WORKS
  * ────────────────────
@@ -24,16 +33,12 @@ pragma solidity ^0.8.0;
  *                     is eliminated; round auto-advances
  * 6. advanceRound() – (optional) manually advance if spin not called in time
  * 7. claimPrize()   – last non-host player standing claims the full prize pool
- *
- * WINNER LOGIC
- * ────────────
- * The host is the game operator — they stake and run the game but are NOT
- * eligible to win. Only the 5 joining players compete. The last of the 5
- * still standing when all others are eliminated wins the full prize pool.
- * The game completes as soon as only 1 non-host player remains active,
- * regardless of how many total players (including host) are still alive.
  */
-contract BreevsRussianRoulette {
+contract BreevsRussianRoulette is
+    Initializable,
+    OwnableUpgradeable,
+    UUPSUpgradeable
+{
     // ─── Constants ───────────────────────────────────────────────────────────
 
     uint256 public constant MAX_PLAYERS = 6;
@@ -115,6 +120,20 @@ contract BreevsRussianRoulette {
     event RoundAdvanced(uint256 indexed gameId, uint256 newRound);
     event GameCompleted(uint256 indexed gameId, address winner);
     event PrizeClaimed(uint256 indexed gameId, address winner, uint256 amount);
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Initializes the proxy. Call once at deploy via `deployProxy`.
+     * @param initialOwner Address allowed to authorize UUPS upgrades.
+     */
+    function initialize(address initialOwner) external initializer {
+        require(initialOwner != address(0), "Invalid owner");
+        __Ownable_init(initialOwner);
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     //  GAME MANAGEMENT
@@ -269,10 +288,6 @@ contract BreevsRussianRoulette {
 
     /**
      * @notice STEP 2 – Anyone resolves the pending spin after REVEAL_DELAY blocks.
-     *
-     *         Picks a random non-host player to eliminate. If that elimination
-     *         leaves only 1 non-host player alive, that player is declared the
-     *         winner — NOT the host.
      */
     function resolveSpin(uint256 gameId) external {
         Game storage g = games[gameId];
@@ -289,12 +304,10 @@ contract BreevsRussianRoulette {
             "Spin request expired - call requestSpin again"
         );
 
-        // Build pools — all active players (for entropy) and eligible victims (non-host)
         address[] memory allActive = _getActivePlayers(gameId);
         address[] memory eligible = _getEligiblePlayers(gameId, g.creator);
         require(eligible.length > 0, "No eligible players to eliminate");
 
-        // Derive seed from multiple entropy sources
         bytes32 seed = keccak256(
             abi.encodePacked(
                 block.prevrandao,
@@ -310,14 +323,11 @@ contract BreevsRussianRoulette {
         uint256 victimIdx = uint256(seed) % eligible.length;
         address victim = eligible[victimIdx];
 
-        // Clear pending spin before state changes (re-entrancy guard)
         delete pendingSpins[gameId];
 
-        // Eliminate the chosen player
         _eliminatePlayer(gameId, victim, g.creator);
         emit PlayerEliminated(gameId, victim, g.currentRound);
 
-        // Auto-advance round if game is still running
         if (g.status == Status.IN_PROGRESS) {
             g.currentRound++;
             g.roundEnd = block.number + g.roundDuration;
@@ -345,10 +355,8 @@ contract BreevsRussianRoulette {
 
         require(!pendingSpins[gameId].pending, "Resolve pending spin first");
 
-        // Check if any eligible players remain
         address[] memory eligible = _getEligiblePlayers(gameId, g.creator);
         if (eligible.length <= 1) {
-            // Only 0 or 1 non-host player left — complete the game
             _completeGameFromEligible(gameId, eligible);
         } else {
             g.currentRound++;
@@ -363,8 +371,7 @@ contract BreevsRussianRoulette {
 
     /**
      * @notice The last surviving non-host player calls this to collect the
-     *         full prize pool. The host cannot claim even if they are the
-     *         last person technically alive in the players array.
+     *         full prize pool.
      */
     function claimPrize(uint256 gameId) external {
         Game storage g = games[gameId];
@@ -386,32 +393,35 @@ contract BreevsRussianRoulette {
     //  VIEW HELPERS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Returns all active (non-eliminated) players including the host.
     function getActivePlayers(
         uint256 gameId
     ) external view returns (address[] memory) {
         return _getActivePlayers(gameId);
     }
 
-    /// @notice Returns active non-host players — the only ones who can be
-    ///         eliminated or win.
     function getEligiblePlayers(
         uint256 gameId
     ) external view returns (address[] memory) {
         return _getEligiblePlayers(gameId, games[gameId].creator);
     }
 
-    /// @notice Returns the pending spin request for a game (if any).
     function getPendingSpin(
         uint256 gameId
     ) external view returns (SpinRequest memory) {
         return pendingSpins[gameId];
     }
 
-    /// @notice Returns the full game struct.
     function getGame(uint256 gameId) external view returns (Game memory) {
         return games[gameId];
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  UUPS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyOwner {}
 
     // ═══════════════════════════════════════════════════════════════════════════
     //  INTERNAL HELPERS
@@ -428,7 +438,6 @@ contract BreevsRussianRoulette {
         return false;
     }
 
-    /// @dev All non-eliminated players including the host.
     function _getActivePlayers(
         uint256 gameId
     ) internal view returns (address[] memory) {
@@ -447,8 +456,6 @@ contract BreevsRussianRoulette {
         return active;
     }
 
-    /// @dev Non-eliminated players excluding the host.
-    ///      These are the only players who can be eliminated OR win.
     function _getEligiblePlayers(
         uint256 gameId,
         address host
@@ -475,16 +482,6 @@ contract BreevsRussianRoulette {
         return keccak256(abi.encodePacked(players));
     }
 
-    /**
-     * @dev Marks player as eliminated then checks the eligible pool.
-     *      If exactly 1 non-host player remains they are the winner.
-     *      If 0 remain the game ends with no winner (edge case: shouldn't
-     *      happen in normal flow since requestSpin guards against it).
-     *
-     *      KEY FIX: completion is triggered on eligible.length == 1,
-     *      NOT allActive.length == 1. The host being alive is irrelevant
-     *      to the win condition.
-     */
     function _eliminatePlayer(
         uint256 gameId,
         address player,
@@ -494,22 +491,13 @@ contract BreevsRussianRoulette {
         playerGameData[gameId][player].eliminationRound = games[gameId]
             .currentRound;
 
-        // Check remaining eligible (non-host) players after elimination
         address[] memory eligible = _getEligiblePlayers(gameId, host);
 
         if (eligible.length == 1) {
-            // Exactly one non-host player left — they are the winner
             _completeGameFromEligible(gameId, eligible);
         }
-        // If eligible.length > 1: game continues normally
-        // If eligible.length == 0: all non-host players eliminated simultaneously
-        //    (cannot happen in practice — requestSpin prevents spinning with < 1 eligible)
     }
 
-    /**
-     * @dev Completes the game. Winner is the sole remaining eligible player.
-     *      Called from both _eliminatePlayer and advanceRound.
-     */
     function _completeGameFromEligible(
         uint256 gameId,
         address[] memory eligible
@@ -518,7 +506,7 @@ contract BreevsRussianRoulette {
 
         Game storage g = games[gameId];
         g.status = Status.COMPLETED;
-        g.winner = eligible[0]; // always a non-host player
+        g.winner = eligible[0];
         g.totalRounds = g.currentRound;
 
         emit GameCompleted(gameId, g.winner);
@@ -539,4 +527,7 @@ contract BreevsRussianRoulette {
     receive() external payable {
         revert("Use joinGame or createGame");
     }
+
+    /// @dev Reserved storage gap for future upgrades (do not shrink).
+    uint256[50] private __gap;
 }

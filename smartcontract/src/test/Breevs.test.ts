@@ -2,7 +2,7 @@ import hardhat from "hardhat";
 import { expect } from "chai";
 import type { ContractTransactionReceipt, Signer } from "ethers";
 
-const { ethers } = hardhat;
+const { ethers, upgrades } = hardhat;
 
 // ─── Constants mirroring the contract ────────────────────────────────────────
 const ONE_CELO = ethers.parseEther("1");
@@ -18,15 +18,19 @@ async function mineBlocks(n: number): Promise<void> {
   }
 }
 
-/** Deploy a fresh contract before each test. */
+/** Deploy a fresh UUPS proxy before each test. */
 async function deployFresh() {
   const signers = await ethers.getSigners();
+  const [deployer] = signers;
 
-  const Factory = await ethers.getContractFactory(
-    "BreevsRussianRoulette"
+  const Factory = await ethers.getContractFactory("BreevsRussianRoulette");
+
+  const contract = await upgrades.deployProxy(
+    Factory,
+    [await deployer.getAddress()],
+    { kind: "uups", initializer: "initialize" }
   );
-
-  const contract = await Factory.deploy();
+  await contract.waitForDeployment();
 
   return { contract, signers };
 }
@@ -139,7 +143,9 @@ describe("BreevsRussianRoulette", function () {
       const { contract } = await deployFresh();
 
       expect(await contract.MAX_PLAYERS()).to.equal(6n);
-      expect(await contract.MIN_PLAYER_STAKE()).to.equal(ONE_CELO);
+      expect(await contract.MIN_PLAYER_STAKE()).to.equal(
+        ethers.parseEther("0.2")
+      );
       expect(await contract.MIN_ROUND_DURATION()).to.equal(10n);
       expect(await contract.MAX_ROUND_DURATION()).to.equal(1000n);
       expect(await contract.HOST_BALANCE_MULTIPLIER()).to.equal(5n);
