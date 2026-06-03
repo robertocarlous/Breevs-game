@@ -139,6 +139,27 @@ export const BREEVS_ABI = [
   },
   {
     inputs: [{ internalType: "uint256", name: "gameId", type: "uint256" }],
+    name: "spin",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "operator", type: "address" }],
+    name: "setSpinOperator",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "spinOperator",
+    outputs: [{ internalType: "address", name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "gameId", type: "uint256" }],
     name: "startGame",
     outputs: [],
     stateMutability: "nonpayable",

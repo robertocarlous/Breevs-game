@@ -4,7 +4,7 @@
 
 Players stake **Celo tokens** to join a game room, and through a cryptographically secure randomized elimination process using VRF, players are eliminated one by one until only one survivor remains to claim the entire prize pool.
 
-The game ensures **transparency, fairness, and tamper-proof gameplay** through on-chain verification and Leather wallet integration.
+The game ensures **transparency, fairness, and tamper-proof gameplay** through on-chain verification
 
 ---
 
@@ -21,10 +21,8 @@ The game ensures **transparency, fairness, and tamper-proof gameplay** through o
 - **On-Chain Randomness**: Uses `burn-block-time` and `block-height` for verifiable randomness
 - **Transparent Gameplay**: All actions recorded on CELO blockchain
 - **Tamper-Proof**: Smart contract enforces game rules
-- **CELO Native**: Direct STX transfers for stakes and payouts
+- **CELO Native**: Direct CELO transfers for stakes and payouts
 
-### 💼 Wallet Integration
-- **Leather Wallet**: Official Stacks wallet for seamless experience
 
 
 ---

@@ -1,15 +1,24 @@
 {
-  "network": "celo-sepolia",
-  "chainId": "11142220",
-  "contractAddress": "0x2c8C776D10647daa0D59D319d1C33CA364068e48",
-  "deployer": "0x4E0839B4ecf8DC3aD2Ba5D46737678d3126458F7",
-  "deployedAt": "2026-05-13T10:26:32.617Z",
+  "network": "celo-mainnet",
+  "chainId": "42220",
+  "proxyType": "UUPS",
+  "contractAddress": "0x641ff69fe26c504a8a06E611D2a961A39f2a796b",
+  "proxyAddress": "0x641ff69fe26c504a8a06E611D2a961A39f2a796b",
+  "implementationAddress": "0xBc671873757b93229cd575436C7219944a872eE5",
+  "owner": "0x2987D32F2272E4Bab01B6D12e61c2559bD792A08",
+  "deployer": "0x2987D32F2272E4Bab01B6D12e61c2559bD792A08",
+  "deployedAt": "2026-06-02T00:00:00.000Z",
+  "gTokenAddress": "0x62B8B11039FcfE5aB0C56E502b1C372A3d2a9c7A",
   "constants": {
     "MAX_PLAYERS": "6",
-    "MIN_PLAYER_STAKE_CELO": "1.0",
-    "MAX_PLAYER_STAKE_CELO": "1000.0",
+    "MIN_PLAYER_STAKE_G$": "0.2",
+    "MAX_PLAYER_STAKE_G$": "1000.0",
     "HOST_BALANCE_MULTIPLIER": "5",
     "MIN_ROUND_DURATION_BLOCKS": "10",
     "MAX_ROUND_DURATION_BLOCKS": "1000"
-  }
+  },
+  "upgradedAt": "2026-06-03T04:01:50.537Z",
+  "upgradedBy": "0x2987D32F2272E4Bab01B6D12e61c2559bD792A08",
+  "spinOperator": "0x2987D32F2272E4Bab01B6D12e61c2559bD792A08",
+  "setSpinOperatorTx": "0x11d9498594569a74c064630e43cc4f60051d3f2770b773511c284d213c327afa"
 }

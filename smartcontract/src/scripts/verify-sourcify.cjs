@@ -137,13 +137,19 @@ function ensureDeploymentFile() {
 
 async function verify() {
     const deployment = ensureDeploymentFile();
-    const CONTRACT_ADDRESS = deployment.contractAddress;
+    // UUPS: verify implementation bytecode (logic contract), not the proxy shell
+    const CONTRACT_ADDRESS =
+        deployment.implementationAddress || deployment.contractAddress;
+    const PROXY_ADDRESS = deployment.proxyAddress || deployment.contractAddress;
     const CHAIN_ID = String(deployment.chainId);
 
     console.log("================================================");
     console.log("  Breevs Russian Roulette - Sourcify Verify    ");
     console.log("================================================");
-    console.log("Contract :", CONTRACT_ADDRESS);
+    if (deployment.implementationAddress) {
+        console.log("Proxy (app)  :", PROXY_ADDRESS);
+    }
+    console.log("Verifying    :", CONTRACT_ADDRESS);
     console.log("Chain ID :", CHAIN_ID);
     console.log("Network  :", deployment.network || "unknown");
     console.log("------------------------------------------------");
