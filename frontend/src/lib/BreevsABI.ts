@@ -113,14 +113,14 @@ export const BREEVS_ABI = [
     ],
     name: "createGame",
     outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
-    stateMutability: "payable",
+    stateMutability: "nonpayable",
     type: "function",
   },
   {
     inputs: [{ internalType: "uint256", name: "gameId", type: "uint256" }],
     name: "joinGame",
     outputs: [],
-    stateMutability: "payable",
+    stateMutability: "nonpayable",
     type: "function",
   },
   {
@@ -273,5 +273,12 @@ export const BREEVS_ABI = [
     stateMutability: "view",
     type: "function",
   },
-  { stateMutability: "payable", type: "receive" },
+  // gToken – the G$ ERC-20 token address used for stakes
+  {
+    inputs: [],
+    name: "gToken",
+    outputs: [{ internalType: "address", name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
 ] as const;

@@ -42,7 +42,12 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
 
   const handleAction = async () => {
     if (!address) {
-      showErrorToast("Please connect your wallet to interact", "Wallet Required");
+      // Non-connected users can watch any game in progress or ended
+      if (game.status !== GameStatus.Active) {
+        router.push(`/GameScreen/${game.gameId.toString()}`);
+      } else if (onClick) {
+        onClick(); // triggers the connect prompt on the parent
+      }
       return;
     }
     if (isJoinDisabled) {
@@ -74,22 +79,22 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
   /* ─── Per-status visual theme ───────────────────────────────── */
   const T = (() => {
     if (isCancelled) return {
-      wrap:       "border-[#2a0a0a] hover:border-[#4a1010] bg-[#0c0404]",
-      topBar:     "via-red-900/40",
-      badge:      "text-red-500/80 border-red-900/50 bg-red-950/30",
-      dot:        "bg-red-800",
+      wrap:       "border-white/[0.06] hover:border-white/[0.12] bg-[#050810]",
+      topBar:     "via-gray-700/40",
+      badge:      "text-gray-500 border-gray-700/40 bg-gray-900/40",
+      dot:        "bg-gray-600",
       label:      "Cancelled",
       priceColor: "text-gray-500",
       note:       "Stake refunded",
       cta:        "bg-white/5 hover:bg-white/8 text-gray-500",
       ctaText:    "View",
       mascotOpacity: "opacity-10 grayscale",
-      logoOpacity:   "opacity-30 grayscale",
+      logoOpacity:   "opacity-20 grayscale",
     };
     if (isEnded) return {
-      wrap:       "border-[#0f2a4a] hover:border-[#1a4070] bg-gradient-to-b from-[#060f1e] to-[#030810]",
+      wrap:       "border-white/[0.06] hover:border-sky-500/30 bg-[#050810]",
       topBar:     "via-sky-500/50",
-      badge:      "text-sky-400 border-sky-700/40 bg-sky-950/40",
+      badge:      "text-sky-400 border-sky-700/40 bg-sky-950/30",
       dot:        "bg-sky-400",
       label:      "Ended",
       priceColor: "text-white",
@@ -97,12 +102,12 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
       cta:        "bg-sky-900/30 hover:bg-sky-800/40 text-sky-300",
       ctaText:    "View Result",
       mascotOpacity: "opacity-20",
-      logoOpacity:   "opacity-60",
+      logoOpacity:   "opacity-50",
     };
     if (game.status === GameStatus.InProgress) return {
-      wrap:       "border-orange-900/40 hover:border-orange-600/50 bg-gradient-to-b from-[#100900] to-[#050200]",
-      topBar:     "via-orange-500/60",
-      badge:      isGameCreator ? "text-amber-300 border-amber-600/40 bg-amber-950/30" : "text-orange-300 border-orange-700/40 bg-orange-950/30",
+      wrap:       "border-white/[0.06] hover:border-orange-500/30 bg-[#050810]",
+      topBar:     "via-orange-500/50",
+      badge:      isGameCreator ? "text-amber-300 border-amber-600/30 bg-amber-950/20" : "text-orange-300 border-orange-700/30 bg-orange-950/20",
       dot:        "bg-orange-400 animate-pulse",
       label:      isGameCreator ? "Your Game" : "In Progress",
       priceColor: "text-orange-300",
@@ -110,24 +115,29 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
       cta:        "bg-orange-700/20 hover:bg-orange-600/30 text-orange-300",
       ctaText:    isGameCreator ? "Manage" : isUserGame ? "Rejoin" : "Watch",
       mascotOpacity: "opacity-15",
-      logoOpacity:   "opacity-50",
+      logoOpacity:   "opacity-40",
     };
     // Active
     return {
-      wrap:       "border-[#1a0a0a] hover:border-red-600/50 bg-gradient-to-b from-[#0e0404] to-[#030103]",
-      topBar:     "via-red-500/70",
-      badge:      isGameCreator ? "text-amber-400 border-amber-600/40 bg-amber-950/30"
-                                : "text-emerald-400 border-emerald-700/40 bg-emerald-950/30",
+      wrap:       isGameCreator
+        ? "border-amber-500/20 hover:border-amber-500/40 bg-[#050810]"
+        : "border-white/[0.06] hover:border-red-600/40 bg-[#050810]",
+      topBar:     isGameCreator ? "via-amber-500/50" : "via-red-500/60",
+      badge:      isGameCreator
+        ? "text-amber-400 border-amber-600/30 bg-amber-950/20"
+        : "text-emerald-400 border-emerald-700/30 bg-emerald-950/20",
       dot:        isGameCreator ? "bg-amber-400" : "bg-emerald-400 animate-pulse",
-      label:      isGameCreator ? "HOST 👑" : "OPEN",
+      label:      isGameCreator ? "HOST" : "OPEN",
       priceColor: "text-red-400",
       note:       "CELO",
       cta:        isGameCreator
         ? "bg-amber-600/20 hover:bg-amber-500/30 text-amber-300"
         : isUserGame
         ? "bg-blue-700/20 hover:bg-blue-600/30 text-blue-300"
+        : !address
+        ? "bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10"
         : "bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/40",
-      ctaText:       isGameCreator ? "Manage" : isUserGame ? "Rejoin" : "Join Game",
+      ctaText: isGameCreator ? "Manage" : isUserGame ? "Rejoin" : !address ? "Connect to Join" : "Join Game",
       mascotOpacity: "opacity-15",
       logoOpacity:   "opacity-50",
     };

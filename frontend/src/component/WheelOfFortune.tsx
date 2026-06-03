@@ -821,23 +821,9 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
     );
   }
 
-  if (!address) {
-    return (
-      <BackgroundImgBlur>
-        <div className="flex flex-col justify-center items-center min-h-screen text-white px-4 gap-4">
-          <p className="text-yellow-300 text-sm sm:text-base text-center">
-            Please connect your wallet to view the game
-          </p>
-          <button
-            onClick={() => openConnectModal?.()}
-            className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg"
-          >
-            Connect Wallet
-          </button>
-        </div>
-      </BackgroundImgBlur>
-    );
-  }
+  const isParticipant = !!address && !!game?.players &&
+    game.players.map((p) => p.toLowerCase()).includes(address.toLowerCase());
+  const isSpectator = !isParticipant;
 
   return (
     <BackgroundImgBlur>
@@ -847,6 +833,26 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
           onClose={() => { setIsStakeModalOpen(false); setSelectedGame(null); }}
           onSuccess={() => { setIsStakeModalOpen(false); refetch(); }}
         />
+
+        {/* Spectator banner */}
+        {isSpectator && (
+          <div className="w-full bg-blue-900/30 border-b border-blue-500/20 px-4 py-2 flex items-center justify-between gap-3 flex-shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-blue-400 shrink-0">👁️</span>
+              <p className="text-blue-300 text-xs truncate">
+                {!address ? "Connect your wallet to participate in this game." : "You're watching this game as a spectator."}
+              </p>
+            </div>
+            {!address && (
+              <button
+                onClick={() => openConnectModal?.()}
+                className="shrink-0 bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all"
+              >
+                Connect
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Top bar */}
         <div className="w-full bg-gradient-to-r from-[#030b1f] via-[#0a1529] to-[#030b1f] border-b border-red-500/20 py-3 px-4 sm:px-6 flex-shrink-0">

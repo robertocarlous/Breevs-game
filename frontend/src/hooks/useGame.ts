@@ -8,10 +8,14 @@ import {
 import { useWriteContract, useAccount, useSwitchChain, useChainId } from "wagmi";
 import { celo } from "wagmi/chains";
 import { parseEventLogs } from "viem";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   publicClient,
   BREEVS_ABI,
+  ERC20_ABI,
+  GD_TOKEN_ADDRESS,
+  GD_IDENTITY_ADDRESS,
+  GD_UBISCHEME_ADDRESS,
   getGameInfo,
   getPlayerData,
   getUserStats,
@@ -20,6 +24,11 @@ import {
   isUserInGame,
   isGameCreator,
   getPendingSpin,
+  getGDBalance,
+  getGDAllowance,
+  getGDIdentityStatus,
+  getGDClaimEntitlement,
+  approveGDArgs,
   createGameArgs,
   cancelGameArgs,
   joinGameArgs,
@@ -28,6 +37,8 @@ import {
   resolveSpinArgs,
   advanceRoundArgs,
   claimPrizeArgs,
+  claimGDArgs,
+  CONTRACT_ADDRESS,
   mapContractError,
   GameStatus,
   GameInfo,
@@ -36,9 +47,8 @@ import {
   SpinRequest,
 } from "@/lib/contractCalls";
 import { useGameStore } from "@/store/gameStore";
-import { useEffect } from "react";
 
-// ─── Re-export types so components don't need to import from two places ────────
+// ─── Re-export types ──────────────────────────────────────────────────────────
 export { GameStatus };
 export type { GameInfo, PlayerData, UserStats, SpinRequest };
 
@@ -121,7 +131,6 @@ export function useAllGames(page: number = 1, pageSize: number = 10) {
     queryKey: ["allGames", page],
     queryFn: async () => {
       const totalGames = await getTotalGames();
-      // Scan newest → oldest so the most recent games appear first
       const end = totalGames;
       const start = totalGames > BigInt(pageSize) ? totalGames - BigInt(pageSize) + 1n : 1n;
       const games: GameInfo[] = [];
@@ -148,7 +157,6 @@ export function useActiveGames(page: number = 1) {
     queryKey: ["activeGames", page],
     queryFn: async () => {
       const totalGames = await getTotalGames();
-      // Scan ALL games newest → oldest to never miss a newly created game
       const games: GameInfo[] = [];
       for (let i = totalGames; i >= 1n; i--) {
         try {
@@ -158,7 +166,6 @@ export function useActiveGames(page: number = 1) {
           console.warn(`Skipping game ${i}:`, error);
         }
       }
-      // Update allGames cache as a side-effect
       queryClient.setQueryData(["allGames", page], games);
       return games.filter(
         (g: GameInfo) =>
@@ -236,11 +243,50 @@ export function useGameStatus(gameId?: bigint): UseQueryResult<GameInfo, Error> 
   return query;
 }
 
+// ─── G$ Token READ HOOKS ──────────────────────────────────────────────────────
+
+export function useGDBalance(address?: string) {
+  return useQuery<bigint, Error>({
+    queryKey: ["gdBalance", address],
+    queryFn: () => getGDBalance(address!),
+    enabled: !!address,
+    refetchInterval: 15000,
+  });
+}
+
+export function useGDAllowance(owner?: string) {
+  return useQuery<bigint, Error>({
+    queryKey: ["gdAllowance", owner],
+    queryFn: () => getGDAllowance(owner!),
+    enabled: !!owner,
+    refetchInterval: 10000,
+  });
+}
+
+// ─── GoodDollar Identity + Claim READ HOOKS ───────────────────────────────────
+
+export function useGDIdentity(address?: string) {
+  return useQuery<boolean, Error>({
+    queryKey: ["gdIdentity", address],
+    queryFn: () => getGDIdentityStatus(address!),
+    enabled: !!address && !!GD_IDENTITY_ADDRESS,
+    staleTime: 60_000,
+  });
+}
+
+export function useGDClaimEntitlement(address?: string) {
+  return useQuery<bigint, Error>({
+    queryKey: ["gdClaimEntitlement", address],
+    queryFn: () => getGDClaimEntitlement(address!),
+    enabled: !!address && !!GD_UBISCHEME_ADDRESS,
+    refetchInterval: 30000,
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// WRITE HOOKS  (wagmi useWriteContract + useWaitForTransactionReceipt)
+// WRITE HOOKS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Generic hook that wraps wagmi writeContract + waits for receipt */
 function useContractWrite() {
   const { writeContractAsync: _write } = useWriteContract();
   const { switchChainAsync } = useSwitchChain();
@@ -263,10 +309,9 @@ function useContractWrite() {
     const hash = await _write(args);
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status === "reverted") {
-      // Simulate with the same args (including account) to extract the revert reason
       try {
         await publicClient.simulateContract({ ...args, account: address });
-      } catch (simErr: any) {
+      } catch (simErr: unknown) {
         throw simErr;
       }
       throw new Error("Transaction reverted on-chain");
@@ -274,11 +319,31 @@ function useContractWrite() {
     return hash;
   };
 
-  return { writeContractAsync, invalidate };
+  return { writeContractAsync, invalidate, address };
+}
+
+/** Checks current G$ allowance and approves if needed before a game action. */
+async function ensureGDApproval(
+  writeContractAsync: ReturnType<typeof useContractWrite>["writeContractAsync"],
+  owner: string,
+  amount: bigint
+) {
+  const allowance = await publicClient.readContract({
+    address: GD_TOKEN_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: "allowance",
+    args: [owner as `0x${string}`, CONTRACT_ADDRESS],
+  }) as bigint;
+
+  if (allowance < amount) {
+    await writeContractAsync(approveGDArgs(amount));
+    // Invalidate allowance cache
+  }
 }
 
 export function useCreateGame() {
-  const { writeContractAsync, invalidate } = useContractWrite();
+  const { writeContractAsync, invalidate, address } = useContractWrite();
+  const qc = useQueryClient();
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -286,13 +351,16 @@ export function useCreateGame() {
     setIsPending(true);
     setError(null);
     try {
+      await ensureGDApproval(writeContractAsync, address!, stake);
       const hash = await writeContractAsync(createGameArgs(duration, stake));
       const receipt = await publicClient.getTransactionReceipt({ hash });
       const logs = parseEventLogs({ abi: BREEVS_ABI, logs: receipt.logs, eventName: "GameCreated" });
       const gameId = logs[0]?.args.gameId ?? await getTotalGames();
       invalidate();
+      qc.invalidateQueries({ queryKey: ["gdBalance", address] });
+      qc.invalidateQueries({ queryKey: ["gdAllowance", address] });
       return { txId: hash, gameId };
-    } catch (err: any) {
+    } catch (err: unknown) {
       const mapped = mapContractError(err);
       const e = new Error(mapped.message);
       setError(e);
@@ -306,7 +374,8 @@ export function useCreateGame() {
 }
 
 export function useJoinGame() {
-  const { writeContractAsync, invalidate } = useContractWrite();
+  const { writeContractAsync, invalidate, address } = useContractWrite();
+  const qc = useQueryClient();
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -314,10 +383,15 @@ export function useJoinGame() {
     setIsPending(true);
     setError(null);
     try {
-      const hash = await writeContractAsync(joinGameArgs(gameId, stake));
+      // Fetch the game's stake if not provided
+      const stakeAmount = stake ?? (await getGameInfo(gameId)).stake;
+      await ensureGDApproval(writeContractAsync, address!, stakeAmount);
+      const hash = await writeContractAsync(joinGameArgs(gameId));
       invalidate();
+      qc.invalidateQueries({ queryKey: ["gdBalance", address] });
+      qc.invalidateQueries({ queryKey: ["gdAllowance", address] });
       return { txId: hash };
-    } catch (err: any) {
+    } catch (err: unknown) {
       const mapped = mapContractError(err);
       const e = new Error(mapped.message);
       setError(e);
@@ -342,7 +416,7 @@ export function useStartGame() {
       const hash = await writeContractAsync(startGameArgs(gameId));
       invalidate();
       return { txId: hash };
-    } catch (err: any) {
+    } catch (err: unknown) {
       const mapped = mapContractError(err);
       const e = new Error(mapped.message);
       setError(e);
@@ -369,7 +443,7 @@ export function useRequestSpin() {
       invalidate();
       qc.invalidateQueries({ queryKey: ["pendingSpin", gameId.toString()] });
       return { txId: hash };
-    } catch (err: any) {
+    } catch (err: unknown) {
       const mapped = mapContractError(err);
       const e = new Error(mapped.message);
       setError(e);
@@ -396,7 +470,7 @@ export function useResolveSpin() {
       invalidate();
       qc.invalidateQueries({ queryKey: ["pendingSpin", gameId.toString()] });
       return { txId: hash };
-    } catch (err: any) {
+    } catch (err: unknown) {
       const mapped = mapContractError(err);
       const e = new Error(mapped.message);
       setError(e);
@@ -421,7 +495,7 @@ export function useAdvanceRound() {
       const hash = await writeContractAsync(advanceRoundArgs(gameId));
       invalidate();
       return { txId: hash };
-    } catch (err: any) {
+    } catch (err: unknown) {
       const mapped = mapContractError(err);
       const e = new Error(mapped.message);
       setError(e);
@@ -435,7 +509,7 @@ export function useAdvanceRound() {
 }
 
 export function useClaimPrize() {
-  const { writeContractAsync, invalidate } = useContractWrite();
+  const { writeContractAsync, invalidate, address } = useContractWrite();
   const qc = useQueryClient();
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -447,8 +521,9 @@ export function useClaimPrize() {
       const hash = await writeContractAsync(claimPrizeArgs(gameId));
       invalidate();
       qc.invalidateQueries({ queryKey: ["isPrizeClaimed", gameId.toString()] });
+      qc.invalidateQueries({ queryKey: ["gdBalance", address] });
       return { txId: hash };
-    } catch (err: any) {
+    } catch (err: unknown) {
       const mapped = mapContractError(err);
       const e = new Error(mapped.message);
       setError(e);
@@ -473,7 +548,7 @@ export function useCancelGame() {
       const hash = await writeContractAsync(cancelGameArgs(gameId));
       invalidate();
       return { txId: hash };
-    } catch (err: any) {
+    } catch (err: unknown) {
       const mapped = mapContractError(err);
       const e = new Error(mapped.message);
       setError(e);
@@ -486,5 +561,33 @@ export function useCancelGame() {
   return { mutateAsync, isPending, error };
 }
 
-// Legacy compatibility alias for components that still use useSpin
+export function useClaimGD() {
+  const { writeContractAsync, address } = useContractWrite();
+  const qc = useQueryClient();
+  const [isPending, setIsPending] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const mutateAsync = async () => {
+    if (!GD_UBISCHEME_ADDRESS) throw new Error("UBIScheme address not configured");
+    setIsPending(true);
+    setError(null);
+    try {
+      const hash = await writeContractAsync(claimGDArgs());
+      qc.invalidateQueries({ queryKey: ["gdBalance", address] });
+      qc.invalidateQueries({ queryKey: ["gdClaimEntitlement", address] });
+      return { txId: hash };
+    } catch (err: unknown) {
+      const mapped = mapContractError(err);
+      const e = new Error(mapped.message);
+      setError(e);
+      throw e;
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  return { mutateAsync, isPending, error };
+}
+
+// Legacy alias
 export const useSpin = useRequestSpin;

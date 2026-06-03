@@ -5,7 +5,7 @@ import { celo } from "wagmi/chains";
 import { BREEVS_ABI } from "./BreevsABI";
 export { BREEVS_ABI };
 
-// ─── Config ─────────────────────────────────────────────────────────────────
+// ─── Breevs Contract ─────────────────────────────────────────────────────────
 
 export const CONTRACT_ADDRESS = (
   process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000"
@@ -13,15 +13,94 @@ export const CONTRACT_ADDRESS = (
 
 export const CONTRACT_NAME = process.env.NEXT_PUBLIC_CONTRACT_NAME || "BreevsRussianRoulette";
 
-export const MIN_STAKE = parseEther("0.2"); // 0.2 CELO — must match contract MIN_STAKE constant
-export const MAX_STAKE = parseEther("5"); // 5 CELO — must match contract MAX_STAKE constant
+// ─── G$ Token (GoodDollar) ───────────────────────────────────────────────────
+
+export const GD_TOKEN_ADDRESS = (
+  process.env.NEXT_PUBLIC_GD_TOKEN_ADDRESS || "0x62B8B11039FcfE5aB0C56E502b1C372A3d2a9c7A"
+) as `0x${string}`;
+
+// G$ on Celo uses 18-decimal representation (same pattern as CELO in the contract)
+export const GD_DECIMALS = 18;
+
+// ─── GoodDollar Protocol Contracts (Identity + UBI Claim) ────────────────────
+
+export const GD_IDENTITY_ADDRESS = (
+  process.env.NEXT_PUBLIC_GD_IDENTITY_ADDRESS || ""
+) as `0x${string}` | "";
+
+export const GD_UBISCHEME_ADDRESS = (
+  process.env.NEXT_PUBLIC_GD_UBISCHEME_ADDRESS || ""
+) as `0x${string}` | "";
+
+// ─── ERC-20 ABI (subset: balance, allowance, approve) ────────────────────────
+
+export const ERC20_ABI = [
+  {
+    inputs: [{ name: "account", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }],
+    name: "allowance",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
+    name: "approve",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+] as const;
+
+// ─── GoodDollar Identity ABI ─────────────────────────────────────────────────
+
+export const GD_IDENTITY_ABI = [
+  {
+    inputs: [{ name: "user", type: "address" }],
+    name: "isWhitelisted",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+// ─── GoodDollar UBIScheme ABI ─────────────────────────────────────────────────
+
+export const GD_UBISCHEME_ABI = [
+  {
+    inputs: [],
+    name: "claim",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "account", type: "address" }],
+    name: "checkEntitlement",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+// ─── Stake Config ─────────────────────────────────────────────────────────────
+
+// Contract uses 1e18 as minimum (18-decimal representation, same pattern as CELO)
+export const MIN_STAKE = parseEther("1");    // 1 G$
+export const MAX_STAKE = parseEther("1000"); // 1000 G$
 
 export const STAKE_OPTIONS = [
-  { label: "0.2", value: parseEther("0.2"), prize: "1.2" },
-  { label: "0.5", value: parseEther("0.5"), prize: "3" },
-  { label: "1", value: parseEther("1"), prize: "6" },
-  { label: "2", value: parseEther("2"), prize: "12" },
-  { label: "5", value: parseEther("5"), prize: "30" },
+  { label: "1",   value: parseEther("1"),   prize: "6" },
+  { label: "5",   value: parseEther("5"),   prize: "30" },
+  { label: "10",  value: parseEther("10"),  prize: "60" },
+  { label: "50",  value: parseEther("50"),  prize: "300" },
+  { label: "100", value: parseEther("100"), prize: "600" },
 ] as const;
 
 // ─── Public client for reads ─────────────────────────────────────────────────
@@ -44,7 +123,7 @@ export enum GameStatus {
   Active = 0,     // CREATED
   InProgress = 1, // IN_PROGRESS
   Ended = 2,      // COMPLETED
-  Cancelled = 3,  // CANCELLED (creator called cancelGame)
+  Cancelled = 3,  // CANCELLED
 }
 
 export interface GameInfo {
@@ -95,8 +174,6 @@ export async function getTotalGames(): Promise<bigint> {
 }
 
 export async function getGameInfo(gameId: bigint): Promise<GameInfo> {
-  // Fetch game struct + active players in parallel
-  // getGame().players includes ALL players (never shrinks); getActivePlayers() is the live count
   const [game, activePlayers] = await Promise.all([
     publicClient.readContract({
       address: CONTRACT_ADDRESS,
@@ -125,7 +202,6 @@ export async function getGameInfo(gameId: bigint): Promise<GameInfo> {
 
   const status = Number(game.status) as GameStatus;
   const winnerAddr = game.winner === "0x0000000000000000000000000000000000000000" ? null : game.winner;
-  // playerCount = currently active (non-eliminated) players; fall back to total if fetch failed
   const playerCount = activePlayers !== null ? activePlayers.length : game.players.length;
 
   return {
@@ -133,11 +209,11 @@ export async function getGameInfo(gameId: bigint): Promise<GameInfo> {
     creator: game.creator,
     stake: game.stake,
     prizePool: game.prizePool,
-    players: game.players,       // full list (all who ever joined) — used to build player registry
+    players: game.players,
     eliminatedPlayers: activePlayers !== null
       ? game.players.filter((p) => !activePlayers.map((a) => a.toLowerCase()).includes(p.toLowerCase()))
       : [],
-    playerCount,                 // ← NOW reflects active (non-eliminated) count
+    playerCount,
     currentRound: Number(game.currentRound),
     roundEnd: game.roundEnd,
     roundDuration: game.roundDuration,
@@ -188,10 +264,7 @@ export async function getUserStats(user: string): Promise<UserStats> {
   };
 }
 
-export async function isPrizeClaimed(
-  gameId: bigint,
-  _user: string
-): Promise<boolean> {
+export async function isPrizeClaimed(gameId: bigint, _user: string): Promise<boolean> {
   const result = await publicClient.readContract({
     address: CONTRACT_ADDRESS,
     abi: BREEVS_ABI,
@@ -201,25 +274,16 @@ export async function isPrizeClaimed(
   return result as boolean;
 }
 
-export async function isUserInGame(
-  gameId: bigint,
-  user: string
-): Promise<boolean> {
+export async function isUserInGame(gameId: bigint, user: string): Promise<boolean> {
   const game = await getGameInfo(gameId);
-  return game.players
-    .map((a) => a.toLowerCase())
-    .includes(user.toLowerCase());
+  return game.players.map((a) => a.toLowerCase()).includes(user.toLowerCase());
 }
 
-export async function isGameCreator(
-  gameId: bigint,
-  user: string
-): Promise<boolean> {
+export async function isGameCreator(gameId: bigint, user: string): Promise<boolean> {
   const game = await getGameInfo(gameId);
   return game.creator.toLowerCase() === user.toLowerCase();
 }
 
-/** Returns only non-eliminated (active) player addresses for a game. */
 export async function getActivePlayers(gameId: bigint): Promise<string[]> {
   const result = await publicClient.readContract({
     address: CONTRACT_ADDRESS,
@@ -238,11 +302,7 @@ export async function getPendingSpin(gameId: bigint): Promise<SpinRequest> {
     args: [gameId],
   });
   const spin = result as { pending: boolean; commitBlock: bigint; round: bigint };
-  return {
-    pending: spin.pending,
-    commitBlock: spin.commitBlock,
-    round: spin.round,
-  };
+  return { pending: spin.pending, commitBlock: spin.commitBlock, round: spin.round };
 }
 
 export async function getCeloBlockNumber(): Promise<number> {
@@ -257,9 +317,63 @@ export async function getAllGameIds(): Promise<bigint[]> {
   return ids;
 }
 
-// ─── WRITE FUNCTIONS (wagmi hooks call these via writeContract) ──────────────
-// These are used in useGame.ts via wagmi's useWriteContract hook.
-// The function bodies below are helper wrappers for non-hook contexts.
+// ─── G$ Token READ FUNCTIONS ─────────────────────────────────────────────────
+
+export async function getGDBalance(address: string): Promise<bigint> {
+  const result = await publicClient.readContract({
+    address: GD_TOKEN_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: [address as `0x${string}`],
+  });
+  return result as bigint;
+}
+
+export async function getGDAllowance(owner: string): Promise<bigint> {
+  const result = await publicClient.readContract({
+    address: GD_TOKEN_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: "allowance",
+    args: [owner as `0x${string}`, CONTRACT_ADDRESS],
+  });
+  return result as bigint;
+}
+
+// ─── GoodDollar Identity + Claim READ ────────────────────────────────────────
+
+export async function getGDIdentityStatus(address: string): Promise<boolean> {
+  if (!GD_IDENTITY_ADDRESS) return false;
+  const result = await publicClient.readContract({
+    address: GD_IDENTITY_ADDRESS as `0x${string}`,
+    abi: GD_IDENTITY_ABI,
+    functionName: "isWhitelisted",
+    args: [address as `0x${string}`],
+  });
+  return result as boolean;
+}
+
+export async function getGDClaimEntitlement(address: string): Promise<bigint> {
+  if (!GD_UBISCHEME_ADDRESS) return 0n;
+  const result = await publicClient.readContract({
+    address: GD_UBISCHEME_ADDRESS as `0x${string}`,
+    abi: GD_UBISCHEME_ABI,
+    functionName: "checkEntitlement",
+    args: [address as `0x${string}`],
+  });
+  return result as bigint;
+}
+
+// ─── WRITE FUNCTION ARG BUILDERS ─────────────────────────────────────────────
+
+export function approveGDArgs(amount: bigint) {
+  return {
+    address: GD_TOKEN_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: "approve" as const,
+    args: [CONTRACT_ADDRESS, amount] as const,
+    chain: celo,
+  };
+}
 
 export function createGameArgs(roundDuration: bigint, stake: bigint = MIN_STAKE) {
   return {
@@ -267,7 +381,6 @@ export function createGameArgs(roundDuration: bigint, stake: bigint = MIN_STAKE)
     abi: BREEVS_ABI,
     functionName: "createGame" as const,
     args: [stake, roundDuration] as const,
-    value: stake,
     chain: celo,
   };
 }
@@ -281,13 +394,12 @@ export function cancelGameArgs(gameId: bigint) {
   };
 }
 
-export function joinGameArgs(gameId: bigint, stake: bigint = MIN_STAKE) {
+export function joinGameArgs(gameId: bigint) {
   return {
     address: CONTRACT_ADDRESS,
     abi: BREEVS_ABI,
     functionName: "joinGame" as const,
     args: [gameId] as const,
-    value: stake,
   };
 }
 
@@ -336,18 +448,31 @@ export function claimPrizeArgs(gameId: bigint) {
   };
 }
 
+export function claimGDArgs() {
+  return {
+    address: GD_UBISCHEME_ADDRESS as `0x${string}`,
+    abi: GD_UBISCHEME_ABI,
+    functionName: "claim" as const,
+    args: [] as const,
+    chain: celo,
+  };
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Format a wei bigint value to a CELO string (e.g. "1.0 CELO") */
-export function formatCelo(wei: bigint): string {
-  return `${parseFloat(formatEther(wei)).toFixed(2)} CELO`;
+export function formatGD(amount: bigint): string {
+  return `${parseFloat(formatEther(amount)).toFixed(2)} G$`;
 }
+
+// Alias kept for backward compat
+export const formatCelo = formatGD;
 
 export function mapContractError(error: unknown): { message: string } {
   if (error instanceof Error) {
     const msg = error.message;
-    if (msg.includes("Stake must be exactly 1 CELO")) return { message: "Stake must be exactly 1 CELO" };
-    if (msg.includes("Must send exactly 1 CELO")) return { message: "Must send exactly 1 CELO as stake" };
+    if (msg.includes("ERC20InsufficientAllowance") || msg.includes("allowance")) return { message: "Insufficient G$ allowance — please approve first" };
+    if (msg.includes("ERC20InsufficientBalance") || msg.includes("insufficient balance")) return { message: "Insufficient G$ balance" };
+    if (msg.includes("Stake must be")) return { message: "Stake must be between 1 and 1000 G$" };
     if (msg.includes("Game not joinable")) return { message: "This game is not open for joining" };
     if (msg.includes("Game is full")) return { message: "Game is full (6 players max)" };
     if (msg.includes("Already in game")) return { message: "You are already in this game" };
@@ -357,9 +482,9 @@ export function mapContractError(error: unknown): { message: string } {
     if (msg.includes("Must wait for RANDAO reveal")) return { message: "Please wait 1 block before resolving the spin" };
     if (msg.includes("Spin request expired")) return { message: "Spin expired – request a new spin" };
     if (msg.includes("No pending spin")) return { message: "No pending spin to resolve" };
-    if (msg.includes("User rejected")) return { message: "Transaction rejected by user" };
-    if (msg.includes("user rejected")) return { message: "Transaction rejected by user" };
+    if (msg.includes("User rejected") || msg.includes("user rejected")) return { message: "Transaction rejected by user" };
     if (msg.includes("Invalid duration")) return { message: "Invalid round duration" };
+    if (msg.includes("Host wallet must hold")) return { message: "Host wallet must hold at least 5× the stake in G$" };
     return { message: msg };
   }
   return { message: String(error) };

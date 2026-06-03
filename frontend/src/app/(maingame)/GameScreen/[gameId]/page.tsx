@@ -16,19 +16,18 @@ export default function GameScreen() {
   const { currentPlayerGame, currentCreatorGame } = useGameStore();
 
   useEffect(() => {
-    if (!isConnected || !address) {
-      router.push("/Home");
-      return;
-    }
-
     if (!gameIdStr) {
-      if (currentPlayerGame && currentPlayerGame.status !== GameStatus.Ended) {
-        router.push(`/GameScreen/${currentPlayerGame.gameId.toString()}`);
-      } else if (
-        currentCreatorGame &&
-        currentCreatorGame.status !== GameStatus.Ended
-      ) {
-        router.push(`/GameScreen/${currentCreatorGame.gameId.toString()}`);
+      if (isConnected && address) {
+        if (currentPlayerGame && currentPlayerGame.status !== GameStatus.Ended) {
+          router.push(`/GameScreen/${currentPlayerGame.gameId.toString()}`);
+        } else if (
+          currentCreatorGame &&
+          currentCreatorGame.status !== GameStatus.Ended
+        ) {
+          router.push(`/GameScreen/${currentCreatorGame.gameId.toString()}`);
+        } else {
+          router.push("/Home");
+        }
       } else {
         router.push("/Home");
       }

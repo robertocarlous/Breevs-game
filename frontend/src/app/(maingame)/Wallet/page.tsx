@@ -5,14 +5,15 @@ import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { Open_Sans } from "next/font/google";
 import { formatEther as fmtEther } from "viem";
-import { useAccount, useDisconnect, useBalance } from "wagmi";
+import { useAccount, useDisconnect } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Copy, Check, LogOut } from "lucide-react";
 import BackgroundImgBlur from "@/component/BackgroundBlur";
-import { useUserStats, useMyGames } from "@/hooks/useGame";
+import { useUserStats, useMyGames, useGDBalance } from "@/hooks/useGame";
 import { GameStatus } from "@/lib/contractCalls";
 import { useRouter } from "next/navigation";
 import Mascot from "@/assets/RR_LOGO_1.png";
+import GoodDollarPanel from "@/component/GoodDollarPanel";
 
 const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "700"] });
 
@@ -23,9 +24,9 @@ export default function WalletPage() {
   const [copied, setCopied]      = useState(false);
   const [histTab, setHistTab]    = useState<"all" | "won" | "lost">("all");
 
-  const { data: balance }                              = useBalance({ address, query: { refetchInterval: 15000 } });
-  const { data: stats }                                = useUserStats(address ?? "");
-  const { data: myGames = [], isLoading: gamesLoading } = useMyGames();
+  const { data: gdBalance = 0n }                               = useGDBalance(address);
+  const { data: stats }                                        = useUserStats(address ?? "");
+  const { data: myGames = [], isLoading: gamesLoading }        = useMyGames();
 
   const copyAddr = () => {
     if (!address) return;
@@ -40,8 +41,8 @@ export default function WalletPage() {
   const netPnl   = stats
     ? (parseFloat(fmtEther(stats.totalWinnings)) - parseFloat(fmtEther(stats.totalStaked))).toFixed(3)
     : "0.000";
-  const inProfit = parseFloat(netPnl) >= 0;
-  const bal      = balance ? parseFloat(fmtEther(balance.value)).toFixed(4) : "—";
+  const inProfit  = parseFloat(netPnl) >= 0;
+  const gdDisplay = parseFloat(fmtEther(gdBalance)).toFixed(2);
 
   const liveGames = myGames.filter(g => g.status === GameStatus.Active || g.status === GameStatus.InProgress);
   const pastGames = myGames
@@ -116,7 +117,6 @@ export default function WalletPage() {
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_80%_20%,rgba(220,38,38,0.07),transparent_65%)] pointer-events-none" />
                 <div className="h-px w-full bg-gradient-to-r from-transparent via-red-700/50 to-transparent" />
 
-                {/* Mascot watermark */}
                 <div className="absolute right-0 bottom-0 w-28 h-32 pointer-events-none select-none opacity-20">
                   <Image src={Mascot} alt="" fill className="object-contain object-bottom-right" />
                 </div>
@@ -145,12 +145,12 @@ export default function WalletPage() {
                     </div>
                   </div>
 
-                  {/* Balance hero */}
+                  {/* G$ Balance hero */}
                   <div className="mb-4">
-                    <p className="text-[10px] text-gray-600 uppercase tracking-widest mb-1">Balance</p>
+                    <p className="text-[10px] text-gray-600 uppercase tracking-widest mb-1">G$ Balance</p>
                     <div className="flex items-baseline gap-2">
-                      <span className="text-4xl font-black text-white">{bal}</span>
-                      <span className="text-lg font-bold text-gray-500">CELO</span>
+                      <span className="text-4xl font-black text-white">{gdDisplay}</span>
+                      <span className="text-lg font-bold text-green-500">G$</span>
                     </div>
                   </div>
 
@@ -170,7 +170,7 @@ export default function WalletPage() {
                 </div>
               </motion.div>
 
-              {/* ── Stats strip (4 cols in one row) ── */}
+              {/* ── Stats strip ── */}
               <motion.div
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -181,7 +181,7 @@ export default function WalletPage() {
                   { label: "Played",  value: String(stats?.gamesPlayed ?? 0), sub: "games",     color: "text-white" },
                   { label: "Won",     value: String(stats?.gamesWon ?? 0),     sub: "victories", color: "text-white" },
                   { label: "Rate",    value: `${winRate}%`,                    sub: "survival",  color: "text-white" },
-                  { label: "Net P&L", value: `${inProfit ? "+" : ""}${netPnl}`, sub: "CELO",    color: inProfit ? "text-emerald-400" : "text-red-400" },
+                  { label: "Net P&L", value: `${inProfit ? "+" : ""}${netPnl}`, sub: "G$",      color: inProfit ? "text-emerald-400" : "text-red-400" },
                 ].map((s, i) => (
                   <div
                     key={s.label}
@@ -189,7 +189,7 @@ export default function WalletPage() {
                   >
                     <p className="text-[8px] text-gray-600 uppercase tracking-widest mb-1">{s.label}</p>
                     <p className={`text-sm font-black ${s.color}`}>{s.value}</p>
-                    <p className="text-[8px] text-gray-700 mt-0.5">{s.sub}</p>
+                    <p className="text-[8px] text-gray-500 mt-0.5">{s.sub}</p>
                   </div>
                 ))}
               </motion.div>
@@ -205,9 +205,9 @@ export default function WalletPage() {
                   <p className="text-[10px] text-gray-600 uppercase tracking-widest">Earnings Record</p>
                 </div>
                 {[
-                  { label: "Total Staked",   value: `${totalStk} CELO`, color: "text-orange-400" },
-                  { label: "Total Winnings", value: `${totalWon} CELO`, color: "text-emerald-400" },
-                  { label: "Net Profit",     value: `${inProfit ? "+" : ""}${netPnl} CELO`,
+                  { label: "Total Staked",   value: `${totalStk} G$`, color: "text-orange-400" },
+                  { label: "Total Winnings", value: `${totalWon} G$`, color: "text-emerald-400" },
+                  { label: "Net Profit",     value: `${inProfit ? "+" : ""}${netPnl} G$`,
                     color: inProfit ? "text-green-400" : "text-red-400" },
                 ].map((row, i, arr) => (
                   <div
@@ -219,6 +219,9 @@ export default function WalletPage() {
                   </div>
                 ))}
               </motion.div>
+
+              {/* ── GoodDollar Panel (claim + identity) ── */}
+              <GoodDollarPanel />
 
             </div>
 
@@ -282,8 +285,8 @@ export default function WalletPage() {
                           cancelled: "border-l-red-900/50 bg-red-950/5",
                         };
                         const RESULT_LABEL = {
-                          won:       <span className="text-green-400 font-black text-xs">+{prize} ₵</span>,
-                          lost:      <span className="text-gray-600 text-xs">-{stake} ₵</span>,
+                          won:       <span className="text-green-400 font-black text-xs">+{prize} G$</span>,
+                          lost:      <span className="text-gray-600 text-xs">-{stake} G$</span>,
                           cancelled: <span className="text-gray-700 text-xs">refunded</span>,
                         };
 
@@ -297,23 +300,18 @@ export default function WalletPage() {
                             onClick={() => router.push(`/GameScreen/${game.gameId}`)}
                             className={`flex items-center gap-3 px-4 py-3 rounded-xl border-l-2 border border-white/[0.04] cursor-pointer hover:border-white/10 transition-colors ${RESULT_STYLE[result]}`}
                           >
-                            {/* Result icon */}
                             <span className="text-base shrink-0">
                               {result === "won" ? "🏆" : result === "cancelled" ? "✕" : "💀"}
                             </span>
-
-                            {/* Info */}
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-bold text-gray-300">Game #{game.gameId.toString()}</p>
                               <p className="text-[10px] text-gray-600">
                                 {game.playerCount} players · {game.currentRound} rounds
                               </p>
                             </div>
-
-                            {/* Amount */}
                             <div className="text-right shrink-0">
                               {RESULT_LABEL[result]}
-                              <p className="text-[9px] text-gray-700 mt-0.5">CELO</p>
+                              <p className="text-[9px] text-gray-700 mt-0.5">G$</p>
                             </div>
                           </motion.div>
                         );
@@ -325,12 +323,12 @@ export default function WalletPage() {
 
               {/* Footer */}
               <div className="text-center mt-8 pb-4">
-                <p className="text-[10px] text-gray-700">
+                <p className="text-[10px] text-gray-500">
                   Running on{" "}
-                  <a href="https://celo.org" target="_blank" rel="noopener noreferrer" className="text-red-700 hover:text-red-500 transition-colors">
+                  <a href="https://celo.org" target="_blank" rel="noopener noreferrer" className="text-green-500 hover:text-green-400 transition-colors">
                     Celo mainnet
                   </a>
-                  {" "}· Need CELO for gas + stake
+                  {" "}· Stakes paid in G$ (GoodDollar)
                 </p>
               </div>
             </div>
