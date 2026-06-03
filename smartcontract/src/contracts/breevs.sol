@@ -4,6 +4,8 @@ pragma solidity ^0.8.22;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title Breevs Russian Roulette – Commit-Reveal Edition (UUPS Upgradeable)
@@ -17,8 +19,9 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
  *
  * HOW RANDOMNESS WORKS
  * ────────────────────
- * Step 1 – requestSpin():  Host commits to the current block number.
- * Step 2 – resolveSpin():  After REVEAL_DELAY blocks, anyone can resolve.
+ * Step 1 – spin() / requestSpin():  Commit at current block (host or spinOperator).
+ * Step 2 – spin() / resolveSpin():  After REVEAL_DELAY blocks, spinOperator resolves
+ *          using on-chain entropy (prevrandao). Users only sign create/join/claim.
  *                          The seed mixes block.prevrandao, timestamps and
  *                          game-specific entropy so the host cannot bias
  *                          the outcome.
@@ -27,9 +30,9 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
  * ────
  * 1. createGame()   – host stakes and sets round duration
  * 2. joinGame()     – 5 more players join (6 total required)
- * 3. startGame()    – host starts; round timer begins
- * 4. requestSpin()  – host commits a spin request
- * 5. resolveSpin()  – anyone resolves after REVEAL_DELAY; one NON-HOST player
+ * 3. startGame()    – auto-called when 6 players join (host may also call)
+ * 4. spin()         – relayer commits OR resolves (two calls, REVEAL_DELAY apart)
+ * 5. resolveSpin()  – spinOperator resolves after REVEAL_DELAY; one NON-HOST player
  *                     is eliminated; round auto-advances
  * 6. advanceRound() – (optional) manually advance if spin not called in time
  * 7. claimPrize()   – last non-host player standing claims the full prize pool
@@ -39,11 +42,13 @@ contract BreevsRussianRoulette is
     OwnableUpgradeable,
     UUPSUpgradeable
 {
+    using SafeERC20 for IERC20;
+
     // ─── Constants ───────────────────────────────────────────────────────────
 
     uint256 public constant MAX_PLAYERS = 6;
-    uint256 public constant MIN_PLAYER_STAKE = 2e17; // 0.2 CELO
-    uint256 public constant MAX_PLAYER_STAKE = 1000e18; // 1000 CELO
+    uint256 public constant MIN_PLAYER_STAKE = 1e18; // 1 G$ (18 decimals on Celo)
+    uint256 public constant MAX_PLAYER_STAKE = 1000e18; // 1000 G$
     uint256 public constant HOST_BALANCE_MULTIPLIER = 5; // host must hold >= 5x stake
     uint256 public constant MIN_ROUND_DURATION = 10; // blocks
     uint256 public constant MAX_ROUND_DURATION = 1000; // blocks
@@ -101,6 +106,12 @@ contract BreevsRussianRoulette is
     mapping(address => UserStats) public userStats;
     mapping(uint256 => SpinRequest) public pendingSpins;
 
+    /// @notice GoodDollar G$ token on Celo (set at initialize).
+    IERC20 public gToken;
+
+    /// @notice Relayer that submits spin txs so players avoid per-round signatures.
+    address public spinOperator;
+
     // ─── Events ──────────────────────────────────────────────────────────────
 
     event GameCreated(uint256 indexed gameId);
@@ -129,10 +140,16 @@ contract BreevsRussianRoulette is
     /**
      * @notice Initializes the proxy. Call once at deploy via `deployProxy`.
      * @param initialOwner Address allowed to authorize UUPS upgrades.
+     * @param gTokenAddress G$ ERC-20 on Celo (mainnet: 0x62B8B11039FcfE5aB0C56E502b1C372A3d2a9c7A).
      */
-    function initialize(address initialOwner) external initializer {
+    function initialize(
+        address initialOwner,
+        address gTokenAddress
+    ) external initializer {
         require(initialOwner != address(0), "Invalid owner");
+        require(gTokenAddress != address(0), "Invalid G$ token");
         __Ownable_init(initialOwner);
+        gToken = IERC20(gTokenAddress);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -147,10 +164,10 @@ contract BreevsRussianRoulette is
     function createGame(
         uint256 playerStake,
         uint256 roundDuration
-    ) external payable returns (uint256) {
+    ) external returns (uint256) {
         require(
             playerStake >= MIN_PLAYER_STAKE && playerStake <= MAX_PLAYER_STAKE,
-            "Stake must be between 0.2 and 1000 CELO"
+            "Stake must be between 1 and 1000 G$"
         );
         require(
             roundDuration >= MIN_ROUND_DURATION &&
@@ -158,16 +175,12 @@ contract BreevsRussianRoulette is
             "Invalid round duration"
         );
         require(
-            msg.value == playerStake,
-            "Host deposit must equal the player stake"
+            gToken.balanceOf(msg.sender) >=
+                HOST_BALANCE_MULTIPLIER * playerStake,
+            "Host wallet must hold at least 5x the player stake in G$"
         );
 
-        // msg.value is deducted from balance before this code runs, so add it back
-        require(
-            address(msg.sender).balance + msg.value >=
-                HOST_BALANCE_MULTIPLIER * playerStake,
-            "Host wallet must hold at least 5x the player stake"
-        );
+        gToken.safeTransferFrom(msg.sender, address(this), playerStake);
 
         gameCounter++;
         Game storage g = games[gameCounter];
@@ -189,12 +202,13 @@ contract BreevsRussianRoulette is
     /**
      * @notice Join an open game by sending the exact stake amount.
      */
-    function joinGame(uint256 gameId) external payable {
+    function joinGame(uint256 gameId) external {
         Game storage g = games[gameId];
         require(g.status == Status.CREATED, "Game not joinable");
         require(g.players.length < MAX_PLAYERS, "Game is full");
         require(!_isUserInGame(gameId, msg.sender), "Already in game");
-        require(msg.value == g.stake, "Must send exactly the game stake");
+
+        gToken.safeTransferFrom(msg.sender, address(this), g.stake);
 
         g.players.push(msg.sender);
         g.prizePool += g.stake;
@@ -203,6 +217,10 @@ contract BreevsRussianRoulette is
         _updateUserStatsOnJoin(msg.sender, g.stake);
 
         emit PlayerJoined(gameId, msg.sender);
+
+        if (g.players.length == MAX_PLAYERS) {
+            _startGameInternal(gameId);
+        }
     }
 
     /**
@@ -223,8 +241,7 @@ contract BreevsRussianRoulette is
             uint256 deposit = playerDeposits[gameId][players[i]];
             if (deposit > 0) {
                 playerDeposits[gameId][players[i]] = 0;
-                (bool sent, ) = payable(players[i]).call{value: deposit}("");
-                require(sent, "Refund failed");
+                gToken.safeTransfer(players[i], deposit);
             }
         }
 
@@ -237,8 +254,151 @@ contract BreevsRussianRoulette is
      */
     function startGame(uint256 gameId) external {
         Game storage g = games[gameId];
-        require(g.status == Status.CREATED, "Game not ready");
         require(msg.sender == g.creator, "Only creator can start");
+        require(g.players.length == MAX_PLAYERS, "Need exactly 6 players");
+        _startGameInternal(gameId);
+    }
+
+    /**
+     * @notice Sets the backend relayer allowed to commit/resolve spins (pays gas).
+     */
+    function setSpinOperator(address operator) external onlyOwner {
+        require(operator != address(0), "Invalid operator");
+        spinOperator = operator;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  SPIN — two-step commit/reveal elimination
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Relayer entrypoint: commit if none pending, else resolve after REVEAL_DELAY.
+     */
+    function spin(uint256 gameId) external {
+        _requireSpinAuthority(gameId);
+        SpinRequest storage req = pendingSpins[gameId];
+        if (!req.pending) {
+            _commitSpin(gameId);
+            return;
+        }
+        _resolveSpin(gameId);
+    }
+
+    /**
+     * @notice STEP 1 – Commit a spin at the current block (host or spinOperator).
+     */
+    function requestSpin(uint256 gameId) external {
+        _requireSpinAuthority(gameId);
+        _commitSpin(gameId);
+    }
+
+    /**
+     * @notice STEP 2 – Resolve after REVEAL_DELAY (spinOperator or anyone).
+     */
+    function resolveSpin(uint256 gameId) external {
+        _resolveSpin(gameId);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  ROUND MANAGEMENT
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Manually advance the round if the host did not spin before the
+     *         round timer expired. Anyone can call this.
+     */
+    function advanceRound(uint256 gameId) external {
+        Game storage g = games[gameId];
+        require(g.status == Status.IN_PROGRESS, "Not in progress");
+        require(block.number > g.roundEnd, "Round not ended yet");
+        require(
+            msg.sender == g.creator ||
+                msg.sender == spinOperator ||
+                spinOperator == address(0),
+            "Not authorized to advance"
+        );
+
+        SpinRequest storage existing = pendingSpins[gameId];
+        if (existing.pending && block.number > existing.commitBlock + 500) {
+            delete pendingSpins[gameId];
+        }
+
+        require(!pendingSpins[gameId].pending, "Resolve pending spin first");
+
+        address[] memory eligible = _getEligiblePlayers(gameId, g.creator);
+        if (eligible.length <= 1) {
+            _completeGameFromEligible(gameId, eligible);
+        } else {
+            g.currentRound++;
+            g.roundEnd = block.number + g.roundDuration;
+            emit RoundAdvanced(gameId, g.currentRound);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  PRIZE CLAIMING
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * @notice The last surviving non-host player calls this to collect the
+     *         full prize pool.
+     */
+    function claimPrize(uint256 gameId) external {
+        Game storage g = games[gameId];
+        require(g.status == Status.COMPLETED, "Game not completed");
+        require(g.winner != address(0), "No winner set");
+        require(msg.sender == g.winner, "Not the winner");
+        require(!prizeClaimed[gameId], "Prize already claimed");
+
+        prizeClaimed[gameId] = true;
+        _updateUserStatsOnWin(msg.sender, g.prizePool);
+
+        gToken.safeTransfer(msg.sender, g.prizePool);
+
+        emit PrizeClaimed(gameId, msg.sender, g.prizePool);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  VIEW HELPERS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function getActivePlayers(
+        uint256 gameId
+    ) external view returns (address[] memory) {
+        return _getActivePlayers(gameId);
+    }
+
+    function getEligiblePlayers(
+        uint256 gameId
+    ) external view returns (address[] memory) {
+        return _getEligiblePlayers(gameId, games[gameId].creator);
+    }
+
+    function getPendingSpin(
+        uint256 gameId
+    ) external view returns (SpinRequest memory) {
+        return pendingSpins[gameId];
+    }
+
+    function getGame(uint256 gameId) external view returns (Game memory) {
+        return games[gameId];
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  UUPS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyOwner {}
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  INTERNAL HELPERS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    function _startGameInternal(uint256 gameId) internal {
+        Game storage g = games[gameId];
+        require(g.status == Status.CREATED, "Game not ready");
         require(g.players.length == MAX_PLAYERS, "Need exactly 6 players");
 
         g.status = Status.IN_PROGRESS;
@@ -248,24 +408,22 @@ contract BreevsRussianRoulette is
         emit GameStarted(gameId);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    //  SPIN — two-step commit/reveal elimination
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice STEP 1 – Host commits a spin request at the current block.
-     *         Must be called while the round window is still open.
-     */
-    function requestSpin(uint256 gameId) external {
+    function _requireSpinAuthority(uint256 gameId) internal view {
         Game storage g = games[gameId];
-        require(msg.sender == g.creator, "Only host can spin");
+        require(
+            msg.sender == g.creator || msg.sender == spinOperator,
+            "Not authorized to spin"
+        );
+    }
+
+    function _commitSpin(uint256 gameId) internal {
+        Game storage g = games[gameId];
         require(g.status == Status.IN_PROGRESS, "Game not in progress");
         require(
             block.number <= g.roundEnd,
             "Round has expired - call advanceRound"
         );
 
-        // Auto-clear a spin that expired (> 500 blocks old)
         SpinRequest storage existing = pendingSpins[gameId];
         if (existing.pending && block.number > existing.commitBlock + 500) {
             delete pendingSpins[gameId];
@@ -273,7 +431,6 @@ contract BreevsRussianRoulette is
 
         require(!pendingSpins[gameId].pending, "Spin already pending");
 
-        // Must have at least 1 eligible (non-host) player left to eliminate
         address[] memory eligible = _getEligiblePlayers(gameId, g.creator);
         require(eligible.length > 0, "No eligible players to eliminate");
 
@@ -286,10 +443,7 @@ contract BreevsRussianRoulette is
         emit SpinRequested(gameId, block.number, g.currentRound);
     }
 
-    /**
-     * @notice STEP 2 – Anyone resolves the pending spin after REVEAL_DELAY blocks.
-     */
-    function resolveSpin(uint256 gameId) external {
+    function _resolveSpin(uint256 gameId) internal {
         Game storage g = games[gameId];
         SpinRequest storage req = pendingSpins[gameId];
 
@@ -334,98 +488,6 @@ contract BreevsRussianRoulette is
             emit RoundAdvanced(gameId, g.currentRound);
         }
     }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //  ROUND MANAGEMENT
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice Manually advance the round if the host did not spin before the
-     *         round timer expired. Anyone can call this.
-     */
-    function advanceRound(uint256 gameId) external {
-        Game storage g = games[gameId];
-        require(g.status == Status.IN_PROGRESS, "Not in progress");
-        require(block.number > g.roundEnd, "Round not ended yet");
-
-        SpinRequest storage existing = pendingSpins[gameId];
-        if (existing.pending && block.number > existing.commitBlock + 500) {
-            delete pendingSpins[gameId];
-        }
-
-        require(!pendingSpins[gameId].pending, "Resolve pending spin first");
-
-        address[] memory eligible = _getEligiblePlayers(gameId, g.creator);
-        if (eligible.length <= 1) {
-            _completeGameFromEligible(gameId, eligible);
-        } else {
-            g.currentRound++;
-            g.roundEnd = block.number + g.roundDuration;
-            emit RoundAdvanced(gameId, g.currentRound);
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //  PRIZE CLAIMING
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * @notice The last surviving non-host player calls this to collect the
-     *         full prize pool.
-     */
-    function claimPrize(uint256 gameId) external {
-        Game storage g = games[gameId];
-        require(g.status == Status.COMPLETED, "Game not completed");
-        require(g.winner != address(0), "No winner set");
-        require(msg.sender == g.winner, "Not the winner");
-        require(!prizeClaimed[gameId], "Prize already claimed");
-
-        prizeClaimed[gameId] = true;
-        _updateUserStatsOnWin(msg.sender, g.prizePool);
-
-        (bool sent, ) = payable(msg.sender).call{value: g.prizePool}("");
-        require(sent, "Transfer failed");
-
-        emit PrizeClaimed(gameId, msg.sender, g.prizePool);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //  VIEW HELPERS
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    function getActivePlayers(
-        uint256 gameId
-    ) external view returns (address[] memory) {
-        return _getActivePlayers(gameId);
-    }
-
-    function getEligiblePlayers(
-        uint256 gameId
-    ) external view returns (address[] memory) {
-        return _getEligiblePlayers(gameId, games[gameId].creator);
-    }
-
-    function getPendingSpin(
-        uint256 gameId
-    ) external view returns (SpinRequest memory) {
-        return pendingSpins[gameId];
-    }
-
-    function getGame(uint256 gameId) external view returns (Game memory) {
-        return games[gameId];
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //  UUPS
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    function _authorizeUpgrade(
-        address newImplementation
-    ) internal override onlyOwner {}
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    //  INTERNAL HELPERS
-    // ═══════════════════════════════════════════════════════════════════════════
 
     function _isUserInGame(
         uint256 gameId,
@@ -525,9 +587,9 @@ contract BreevsRussianRoulette is
     }
 
     receive() external payable {
-        revert("Use joinGame or createGame");
+        revert("Stake with G$ via createGame or joinGame");
     }
 
     /// @dev Reserved storage gap for future upgrades (do not shrink).
-    uint256[50] private __gap;
+    uint256[49] private __gap;
 }

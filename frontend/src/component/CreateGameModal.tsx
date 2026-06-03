@@ -2,7 +2,8 @@
 import Modal from "@/component/ResuableModal";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAccount, useChainId, useSwitchChain, useBalance } from "wagmi";
+import { useAccount, useChainId, useSwitchChain } from "wagmi";
+import { useGBalance } from "@/hooks/useGoodDollar";
 import { celo } from "wagmi/chains";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useCreateGame } from "@/hooks/useGame";
@@ -31,10 +32,10 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
 
   const isWrongChain = isConnected && chainId !== celo.id;
   const selectedOption = STAKE_OPTIONS[selectedStakeIndex];
-  const { data: balanceData } = useBalance({ address, chainId: celo.id });
-  // Contract requires creator wallet to hold ≥ 5× stake (HOST_BALANCE_MULTIPLIER = 5)
+  const { data: gBalance } = useGBalance();
+  // Contract requires creator wallet to hold ≥ 5× stake in G$ (HOST_BALANCE_MULTIPLIER = 5)
   const requiredBalance = selectedOption.value * 5n;
-  const hasEnoughBalance = balanceData ? balanceData.value >= requiredBalance : true;
+  const hasEnoughBalance = gBalance !== undefined ? gBalance >= requiredBalance : true;
 
   const handleSwitchChain = async () => {
     setSwitchError(null);
@@ -147,7 +148,7 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
                   >
                     {option.label}
                   </span>
-                  <span className="text-[9px] text-gray-500 mt-0.5">CELO</span>
+                  <span className="text-[9px] text-gray-500 mt-0.5">G$</span>
                   {isSelected && (
                     <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full shadow-md shadow-red-500/60" />
                   )}
@@ -161,10 +162,10 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
         <div className="mb-5 bg-[#0B1445]/80 border border-amber-500/20 rounded-xl p-4 text-center">
           <p className="text-xs text-gray-500 mb-1 uppercase tracking-widest">Prize Pool</p>
           <p className="text-3xl font-bold text-amber-400 drop-shadow-lg">
-            {selectedOption.prize} CELO
+            {selectedOption.prize} G$
           </p>
           <p className="text-[10px] text-gray-500 mt-1">
-            {selectedOption.label} CELO × 6 players
+            {selectedOption.label} G$ × 6 players
           </p>
         </div>
 
@@ -202,10 +203,10 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
           <div className="mb-4 p-3 bg-amber-900/30 border border-amber-500/40 rounded-xl">
             <p className="text-xs text-amber-300 text-center">
               ⚠️ Your wallet needs at least{" "}
-              <span className="font-bold text-white">{formatEther(requiredBalance)} CELO</span>{" "}
+              <span className="font-bold text-white">{formatEther(requiredBalance)} G$</span>{" "}
               to host this game (5× the stake). You currently have{" "}
               <span className="font-bold text-white">
-                {balanceData ? Number(formatEther(balanceData.value)).toFixed(3) : "..."} CELO
+                {gBalance !== undefined ? Number(formatEther(gBalance)).toFixed(3) : "..."} G$
               </span>.
             </p>
           </div>
@@ -246,7 +247,7 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
               Creating Room...
             </span>
           ) : isConnected ? (
-            `🎰 Create Game Room — ${selectedOption.label} CELO`
+            `🎰 Create Game Room — ${selectedOption.label} G$`
           ) : (
             "Connect Wallet"
           )}

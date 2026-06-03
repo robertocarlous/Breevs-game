@@ -13,15 +13,15 @@ export const CONTRACT_ADDRESS = (
 
 export const CONTRACT_NAME = process.env.NEXT_PUBLIC_CONTRACT_NAME || "BreevsRussianRoulette";
 
-export const MIN_STAKE = parseEther("0.2"); // 0.2 CELO — must match contract MIN_STAKE constant
-export const MAX_STAKE = parseEther("5"); // 5 CELO — must match contract MAX_STAKE constant
+export const MIN_STAKE = parseEther("1"); // 1 G$ — must match contract MIN_PLAYER_STAKE
+export const MAX_STAKE = parseEther("1000");
 
 export const STAKE_OPTIONS = [
-  { label: "0.2", value: parseEther("0.2"), prize: "1.2" },
-  { label: "0.5", value: parseEther("0.5"), prize: "3" },
   { label: "1", value: parseEther("1"), prize: "6" },
   { label: "2", value: parseEther("2"), prize: "12" },
   { label: "5", value: parseEther("5"), prize: "30" },
+  { label: "10", value: parseEther("10"), prize: "60" },
+  { label: "25", value: parseEther("25"), prize: "150" },
 ] as const;
 
 // ─── Public client for reads ─────────────────────────────────────────────────
@@ -267,7 +267,6 @@ export function createGameArgs(roundDuration: bigint, stake: bigint = MIN_STAKE)
     abi: BREEVS_ABI,
     functionName: "createGame" as const,
     args: [stake, roundDuration] as const,
-    value: stake,
     chain: celo,
   };
 }
@@ -281,13 +280,12 @@ export function cancelGameArgs(gameId: bigint) {
   };
 }
 
-export function joinGameArgs(gameId: bigint, stake: bigint = MIN_STAKE) {
+export function joinGameArgs(gameId: bigint, _stake?: bigint) {
   return {
     address: CONTRACT_ADDRESS,
     abi: BREEVS_ABI,
     functionName: "joinGame" as const,
     args: [gameId] as const,
-    value: stake,
   };
 }
 
@@ -338,10 +336,13 @@ export function claimPrizeArgs(gameId: bigint) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Format a wei bigint value to a CELO string (e.g. "1.0 CELO") */
-export function formatCelo(wei: bigint): string {
-  return `${parseFloat(formatEther(wei)).toFixed(2)} CELO`;
+/** Format a wei bigint value to a G$ string (e.g. "1.00 G$") */
+export function formatG(wei: bigint): string {
+  return `${parseFloat(formatEther(wei)).toFixed(2)} G$`;
 }
+
+/** @deprecated use formatG */
+export const formatCelo = formatG;
 
 export function mapContractError(error: unknown): { message: string } {
   if (error instanceof Error) {

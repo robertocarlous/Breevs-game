@@ -2,13 +2,25 @@ require("@nomicfoundation/hardhat-toolbox");
 require("@openzeppelin/hardhat-upgrades");
 require("dotenv").config();
 
-const PRIVATE_KEY = process.env.PRIVATE_KEY || "";
+/** Normalize PRIVATE_KEY from .env (64 hex chars, optional 0x, strip stray '='). */
+function parsePrivateKey(raw) {
+  if (!raw) return [];
+  let k = raw.trim().replace(/^['"]|['"]$/g, "");
+  if (k.startsWith("=")) k = k.slice(1).trim();
+  if (k.startsWith("0x")) k = k.slice(2);
+  if (k.length === 64 && /^[0-9a-fA-F]+$/.test(k)) {
+    return ["0x" + k];
+  }
+  return [];
+}
+
+const DEPLOYER_ACCOUNTS = parsePrivateKey(process.env.PRIVATE_KEY || "");
 const CELOSCAN_API_KEY = process.env.CELOSCAN_API_KEY || "";
 
-if (!PRIVATE_KEY) {
+if (DEPLOYER_ACCOUNTS.length === 0) {
   console.warn(
-    "WARNING: PRIVATE_KEY not set in .env — deployment will fail.\n" +
-    "Create a .env file with: PRIVATE_KEY=your_wallet_private_key_here"
+    "WARNING: PRIVATE_KEY not set or invalid in .env — deployment will fail.\n" +
+      "Use 64 hex characters (with or without 0x prefix)."
   );
 }
 
@@ -36,7 +48,7 @@ module.exports = {
     "celo-sepolia": {
       url: process.env.RPC_URL || "https://celo-sepolia.drpc.org",
       chainId: 11142220,
-      accounts: PRIVATE_KEY ? [PRIVATE_KEY] : [],
+      accounts: DEPLOYER_ACCOUNTS,
     },
 
     // ── Celo Mainnet ──────────────────────────────────────────────────────
@@ -44,7 +56,7 @@ module.exports = {
     "celo-mainnet": {
       url: "https://forno.celo.org",
       chainId: 42220,
-      accounts: PRIVATE_KEY ? [PRIVATE_KEY] : [],
+      accounts: DEPLOYER_ACCOUNTS,
     },
   },
 

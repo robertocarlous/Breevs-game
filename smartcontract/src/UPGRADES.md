@@ -35,6 +35,15 @@ Only the **owner** can upgrade. Games in progress and balances stay on the proxy
 
 The contract at `0xfce551a7...` on mainnet is a **direct implementation**, not a proxy. You cannot upgrade it in place.
 
+## Gasless spins (relayer)
+
+After upgrading to an implementation with `spinOperator`:
+
+1. Fund a dedicated relayer wallet with CELO for gas.
+2. `SPIN_OPERATOR=0xRelayer... npx hardhat run scripts/set-spin-operator.cjs --network celo-mainnet`
+3. Set `SPIN_RELAYER_PRIVATE_KEY` in the Next.js server env (same relayer key).
+4. Players only sign **create**, **join**, and **claim**; spins use commit/reveal on-chain via `/api/spin`.
+
 1. Deploy a **new** UUPS proxy with `npm run deploy:mainnet`.
 2. Update the frontend env to the new **proxy** address.
 3. Treat the old contract as legacy (games there finish on the old contract).

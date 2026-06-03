@@ -37,6 +37,7 @@ import {
 } from "@/lib/contractCalls";
 import { useGameStore } from "@/store/gameStore";
 import { useEffect } from "react";
+import { ensureGAllowance } from "@/hooks/useGoodDollar";
 
 // ─── Re-export types so components don't need to import from two places ────────
 export { GameStatus };
@@ -293,6 +294,7 @@ export function useCreateGame() {
     setIsPending(true);
     setError(null);
     try {
+      if (address) await ensureGAllowance(address as `0x${string}`, stake);
       const hash = await writeContractAsync(createGameArgs(duration, stake));
       const receipt = await publicClient.getTransactionReceipt({ hash });
       const logs = parseEventLogs({ abi: BREEVS_ABI, logs: receipt.logs, eventName: "GameCreated" });
@@ -321,6 +323,8 @@ export function useJoinGame() {
     setIsPending(true);
     setError(null);
     try {
+      const amount = stake ?? (await getGameInfo(gameId)).stake;
+      if (address) await ensureGAllowance(address as `0x${string}`, amount);
       const hash = await writeContractAsync(joinGameArgs(gameId, stake));
       invalidate();
       return { txId: hash };

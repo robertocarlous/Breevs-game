@@ -1,15 +1,24 @@
 {
   "network": "celo-mainnet",
   "chainId": "42220",
-  "contractAddress": "0xfce551a702AbCecCD5cd70f2fa29768bedb5D064",
+  "proxyType": "UUPS",
+  "contractAddress": "0x641ff69fe26c504a8a06E611D2a961A39f2a796b",
+  "proxyAddress": "0x641ff69fe26c504a8a06E611D2a961A39f2a796b",
+  "implementationAddress": "0xBc671873757b93229cd575436C7219944a872eE5",
+  "owner": "0x2987D32F2272E4Bab01B6D12e61c2559bD792A08",
   "deployer": "0x2987D32F2272E4Bab01B6D12e61c2559bD792A08",
-  "deployedAt": "2026-05-15T08:48:15.180Z",
+  "deployedAt": "2026-06-02T00:00:00.000Z",
+  "gTokenAddress": "0x62B8B11039FcfE5aB0C56E502b1C372A3d2a9c7A",
   "constants": {
     "MAX_PLAYERS": "6",
-    "MIN_PLAYER_STAKE_CELO": "0.2",
-    "MAX_PLAYER_STAKE_CELO": "1000.0",
+    "MIN_PLAYER_STAKE_G$": "0.2",
+    "MAX_PLAYER_STAKE_G$": "1000.0",
     "HOST_BALANCE_MULTIPLIER": "5",
     "MIN_ROUND_DURATION_BLOCKS": "10",
     "MAX_ROUND_DURATION_BLOCKS": "1000"
-  }
+  },
+  "upgradedAt": "2026-06-03T04:01:50.537Z",
+  "upgradedBy": "0x2987D32F2272E4Bab01B6D12e61c2559bD792A08",
+  "spinOperator": "0x2987D32F2272E4Bab01B6D12e61c2559bD792A08",
+  "setSpinOperatorTx": "0x11d9498594569a74c064630e43cc4f60051d3f2770b773511c284d213c327afa"
 }

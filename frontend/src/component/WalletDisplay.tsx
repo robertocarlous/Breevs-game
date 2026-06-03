@@ -6,6 +6,9 @@ import { faUnlink } from "@fortawesome/free-solid-svg-icons";
 import { Open_Sans } from "next/font/google";
 import { useAccount, useDisconnect } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { formatEther } from "viem";
+import { useGBalance } from "@/hooks/useGoodDollar";
+import { G_TOKEN_SYMBOL } from "@/config/gooddollar";
 
 const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "700"] });
 
@@ -19,6 +22,7 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
   const { isConnected, address } = useAccount();
   const { disconnect } = useDisconnect();
   const { openConnectModal } = useConnectModal();
+  const { data: gBalance } = useGBalance();
 
   return (
     <div className="flex flex-col items-center space-y-3">
@@ -44,7 +48,12 @@ const WalletDisplay: React.FC<WalletDisplayProps> = ({
             <div
               className={`${openSans.className} bg-gray-300 rounded-full text-sm py-1 px-4 font-semibold text-[#1B225D]`}
             >
-              Balance: <span className="text-red-500 ml-1">CELO Connected</span>
+              Balance:{" "}
+              <span className="text-red-500 ml-1">
+                {gBalance !== undefined
+                  ? `${Number(formatEther(gBalance)).toFixed(2)} ${G_TOKEN_SYMBOL}`
+                  : `${G_TOKEN_SYMBOL} connected`}
+              </span>
             </div>
           )}
         </>

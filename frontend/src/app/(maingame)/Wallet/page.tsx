@@ -2,6 +2,7 @@
 
 import BackgroundImg from "@/component/BackgroundImg";
 import WalletDisplay from "@/component/WalletDisplay";
+import GoodDollarClaimPanel from "@/component/GoodDollarClaimPanel";
 import { Open_Sans } from "next/font/google";
 
 const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "700"] });
@@ -18,9 +19,12 @@ const Wallet: React.FC = () => {
       >
         <span className="text-lg font-bold text-start">Play & Win Rewards</span>
         <p className="text-sm leading-relaxed">
-          Enter the Breevs arena — a high-stakes Russian Roulette elimination game on Celo.
-          Six players stake CELO, one survives, winner takes all. Connect your wallet and join a match on Celo Sepolia testnet.
+          Stake GoodDollar (G$) to enter games on Celo. Six players, one survivor
+          takes the full prize pool — claimed in-app with one tap.
         </p>
+        <div className="pt-2">
+          <GoodDollarClaimPanel />
+        </div>
       </div>
 
       <div

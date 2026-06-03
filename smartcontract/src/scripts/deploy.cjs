@@ -21,9 +21,15 @@ async function main() {
   const Factory = await ethers.getContractFactory("BreevsRussianRoulette");
 
   console.log("Deploying UUPS proxy + implementation...");
+  const G_TOKEN =
+    process.env.G_TOKEN_ADDRESS ||
+    "0x62B8B11039FcfE5aB0C56E502b1C372A3d2a9c7A"; // G$ on Celo mainnet
+
+  console.log("G$ token    :", G_TOKEN);
+
   const proxy = await upgrades.deployProxy(
     Factory,
-    [deployer.address],
+    [deployer.address, G_TOKEN],
     { kind: "uups", initializer: "initialize" }
   );
   await proxy.waitForDeployment();
@@ -63,10 +69,11 @@ async function main() {
     owner: deployer.address,
     deployer: deployer.address,
     deployedAt: new Date().toISOString(),
+    gTokenAddress: G_TOKEN,
     constants: {
       MAX_PLAYERS: maxPlayers.toString(),
-      MIN_PLAYER_STAKE_CELO: ethers.formatEther(minStake),
-      MAX_PLAYER_STAKE_CELO: ethers.formatEther(maxStake),
+      MIN_PLAYER_STAKE_G$: ethers.formatEther(minStake),
+      MAX_PLAYER_STAKE_G$: ethers.formatEther(maxStake),
       HOST_BALANCE_MULTIPLIER: hostMultiplier.toString(),
       MIN_ROUND_DURATION_BLOCKS: minRound.toString(),
       MAX_ROUND_DURATION_BLOCKS: maxRound.toString(),
