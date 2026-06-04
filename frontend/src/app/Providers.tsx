@@ -26,8 +26,11 @@ export const celo = {
 
 const config = getDefaultConfig({
   appName: "Breevs",
+  // This project ID must be registered at cloud.walletconnect.com with the
+  // deployed domain whitelisted. Set NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID in
+  // your deployment environment (Vercel / Render / etc.) before building.
   projectId:
-    process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "breevsrussianroulette",
+    process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "a57f6a630362fdc53139d4d5fd7dcd59",
   chains: [celo],
   transports: {
     [_celo.id]: fallback(celoRpcs.map((url) => http(url))),

@@ -98,13 +98,21 @@ export default function AICommentaryBox({
     }
   };
 
+  // Each call gets a unique session ID. Old sessions detect they're stale and stop.
+  const sessionRef = useRef(0);
+
   const typewriterEffect = (text: string) => {
+    // Cancel any running timer from the previous session
     if (timerRef.current) clearTimeout(timerRef.current);
+    // Increment session — any in-flight callback that holds the old session value will bail out
+    const session = ++sessionRef.current;
     isTypingRef.current = true;
     setIsTyping(true);
     setDisplayedText("");
     let i = 0;
     const type = () => {
+      // If a newer session started, stop this one immediately
+      if (sessionRef.current !== session) return;
       if (i < text.length) {
         setDisplayedText((prev) => prev + text.charAt(i));
         i++;
