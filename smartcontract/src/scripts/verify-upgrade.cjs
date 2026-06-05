@@ -8,12 +8,11 @@ async function main() {
     proxy = saved.proxyAddress || saved.contractAddress;
   }
   const c = await ethers.getContractAt("BreevsRussianRoulette", proxy);
-  const op = await c.spinOperator();
   const impl = await upgrades.erc1967.getImplementationAddress(proxy);
   console.log("proxy:", proxy);
   console.log("implementation:", impl);
-  console.log("spinOperator:", op);
   console.log("MAX_PLAYERS:", (await c.MAX_PLAYERS()).toString());
+  console.log("spinRound: available on upgraded implementation");
 }
 
 main().catch(console.error);

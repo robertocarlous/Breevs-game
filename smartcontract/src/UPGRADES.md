@@ -8,6 +8,8 @@
 | **Implementation** | Logic contract — replaced on upgrade; do not use in the app |
 | **Owner** | Wallet that can call `upgradeTo` (deployer by default) |
 
+**You do not redeploy the proxy when upgrading.** Only the implementation address changes; the proxy and all game state stay the same.
+
 ## Deploy (new proxy)
 
 ```bash
@@ -24,25 +26,28 @@ npm run deploy:sepolia   # or deploy:mainnet
 2. Run:
 
 ```bash
-PROXY_ADDRESS=0xYourProxy npm run upgrade:sepolia
+npm run upgrade:mainnet   # or upgrade:sepolia
 ```
 
-Or rely on `proxyAddress` in `deployment.json`.
+Or set `PROXY_ADDRESS=0xYourProxy`. The script reads `proxyAddress` from `deployment.json` by default.
+
+3. Verify the new implementation on Sourcify:
+
+```bash
+npm run verify:sourcify
+```
 
 Only the **owner** can upgrade. Games in progress and balances stay on the proxy.
+
+## Spin model (`spinRound`)
+
+Current games use **`spinRound(gameId)`** — one host-signed transaction per elimination.
+
+Host calls `spinRound(gameId)` once per elimination (one wallet signature). No server relayer is used.
 
 ## Migrating from the old non-proxy deployment
 
 The contract at `0xfce551a7...` on mainnet is a **direct implementation**, not a proxy. You cannot upgrade it in place.
-
-## Gasless spins (relayer)
-
-After upgrading to an implementation with `spinOperator`:
-
-1. Fund a dedicated relayer wallet with CELO for gas.
-2. `SPIN_OPERATOR=0xRelayer... npx hardhat run scripts/set-spin-operator.cjs --network celo-mainnet`
-3. Set `SPIN_RELAYER_PRIVATE_KEY` in the Next.js server env (same relayer key).
-4. Players only sign **create**, **join**, and **claim**; spins use commit/reveal on-chain via `/api/spin`.
 
 1. Deploy a **new** UUPS proxy with `npm run deploy:mainnet`.
 2. Update the frontend env to the new **proxy** address.

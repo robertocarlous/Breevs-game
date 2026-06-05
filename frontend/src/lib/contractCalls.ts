@@ -156,12 +156,6 @@ export interface UserStats {
   totalStaked: bigint;
 }
 
-export interface SpinRequest {
-  pending: boolean;
-  commitBlock: bigint;
-  round: bigint;
-}
-
 // ─── READ FUNCTIONS ──────────────────────────────────────────────────────────
 
 export async function getTotalGames(): Promise<bigint> {
@@ -294,17 +288,6 @@ export async function getActivePlayers(gameId: bigint): Promise<string[]> {
   return result as string[];
 }
 
-export async function getPendingSpin(gameId: bigint): Promise<SpinRequest> {
-  const result = await publicClient.readContract({
-    address: CONTRACT_ADDRESS,
-    abi: BREEVS_ABI,
-    functionName: "getPendingSpin",
-    args: [gameId],
-  });
-  const spin = result as { pending: boolean; commitBlock: bigint; round: bigint };
-  return { pending: spin.pending, commitBlock: spin.commitBlock, round: spin.round };
-}
-
 export async function getCeloBlockNumber(): Promise<number> {
   const block = await publicClient.getBlockNumber();
   return Number(block);
@@ -412,20 +395,11 @@ export function startGameArgs(gameId: bigint) {
   };
 }
 
-export function requestSpinArgs(gameId: bigint) {
+export function spinRoundArgs(gameId: bigint) {
   return {
     address: CONTRACT_ADDRESS,
     abi: BREEVS_ABI,
-    functionName: "requestSpin" as const,
-    args: [gameId] as const,
-  };
-}
-
-export function resolveSpinArgs(gameId: bigint) {
-  return {
-    address: CONTRACT_ADDRESS,
-    abi: BREEVS_ABI,
-    functionName: "resolveSpin" as const,
+    functionName: "spinRound" as const,
     args: [gameId] as const,
   };
 }

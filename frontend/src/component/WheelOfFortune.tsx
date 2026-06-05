@@ -8,12 +8,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   useGameStatus,
   useIsGameCreator,
+  useSpinRound,
+  useAdvanceRound,
   useClaimPrize,
   useIsPrizeClaimed,
-  usePendingSpin,
   useCancelGame,
 } from "@/hooks/useGame";
-import { useSpinRelayer } from "@/hooks/useSpinRelayer";
 import { GameStatus, getCeloBlockNumber, publicClient, CONTRACT_ADDRESS, BREEVS_ABI, MIN_STAKE } from "@/lib/contractCalls";
 import { formatEther, parseAbiItem, parseEventLogs } from "viem";
 import BackgroundImgBlur from "@/component/BackgroundBlur";
@@ -57,8 +57,6 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
   const [eliminatedMap, setEliminatedMap] = useState<Map<string, number>>(new Map());
   const playerInfoRef = useRef(new Map<string, { addr: string; name: string }>());
   const spinActiveRef = useRef(false);
-  const autoAdvanceRef = useRef(false);
-  const autoResolveRef = useRef(false);
   const liveRotationRef = useRef(0);
   // Stable snapshot of the full player list — keeps the polling closure non-stale
   const allPlayersRef = useRef<string[]>([]);
@@ -80,10 +78,9 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
   } = useGameStatus(gameId);
 
   const { data: isGameCreator } = useIsGameCreator(gameId, address || "");
-  const { data: pendingSpin } = usePendingSpin(gameId);
 
-  const { executeSpin, advanceRound: advanceRoundRelayer, isPending: isRelayerPending } =
-    useSpinRelayer();
+  const { mutateAsync: spinRound, isPending: isSpinTx } = useSpinRound();
+  const { mutateAsync: advanceRound, isPending: isAdvancing } = useAdvanceRound();
   const { mutateAsync: claimPrize, isPending: isClaiming } = useClaimPrize();
   const { mutateAsync: cancelGame, isPending: isCancelling } = useCancelGame();
   const { data: isPrizeClaimed } = useIsPrizeClaimed(gameId, address || "");
@@ -439,47 +436,25 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
 
   const activePlayerCount = players.filter((p) => p.status === "Still in").length;
 
-  const isSpinExpired = () =>
-    !!pendingSpin?.pending &&
-    currentBlockNumber > 0 &&
-    currentBlockNumber > Number(pendingSpin.commitBlock) + 500;
-
-  const canSpinRound = () => {
-    if (
-      game?.status !== GameStatus.InProgress ||
-      activePlayerCount <= 1 ||
-      !isConnected ||
-      address?.toLowerCase() !== game?.creator.toLowerCase() ||
-      isSpinning ||
-      isRelayerPending ||
-      isProcessing
-    ) {
-      return false;
-    }
-    if (
-      currentBlockNumber > 0 &&
-      game?.roundEnd &&
-      currentBlockNumber > Number(game.roundEnd)
-    ) {
-      return false;
-    }
-    if (pendingSpin?.pending && !isSpinExpired()) {
-      if (
-        currentBlockNumber > 0 &&
-        currentBlockNumber <= Number(pendingSpin.commitBlock)
-      ) {
-        return false;
-      }
-    }
-    return true;
-  };
+  const canSpinRound = () =>
+    game?.status === GameStatus.InProgress &&
+    activePlayerCount > 1 &&
+    isConnected &&
+    address?.toLowerCase() === game?.creator.toLowerCase() &&
+    !isSpinning &&
+    !isSpinTx &&
+    !isProcessing &&
+    (currentBlockNumber === 0 ||
+      !game?.roundEnd ||
+      currentBlockNumber <= Number(game.roundEnd));
 
   const canAdvanceRound = () =>
     game?.status === GameStatus.InProgress &&
+    isConnected &&
+    address?.toLowerCase() === game?.creator.toLowerCase() &&
     currentBlockNumber > 0 &&
     currentBlockNumber > Number(game?.roundEnd) &&
-    !pendingSpin?.pending &&
-    !isRelayerPending &&
+    !isAdvancing &&
     !isProcessing;
 
   const refreshGameState = async () => {
@@ -491,9 +466,9 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
     } catch {}
   };
 
-  /** Gasless spin: relayer commits + waits for reveal block + resolves on-chain. */
+  /** Single-tx spin: host signs once, contract eliminates one player. */
   const spinRoundAction = async () => {
-    if (isSpinning || isRelayerPending || isProcessing || winner) return;
+    if (isSpinning || isSpinTx || isProcessing || winner) return;
     setError(null);
     setIsProcessing(true);
 
@@ -520,11 +495,8 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
       };
       const spinPromise = fastSpinLoop();
 
-      const relayerResult = await executeSpin(gameId);
-      const txHash = (relayerResult.resolveTxHash || relayerResult.commitTxHash) as
-        | `0x${string}`
-        | undefined;
-      if (!txHash) throw new Error("Spin did not complete on-chain");
+      const spinResult = await spinRound({ gameId });
+      const txHash = spinResult.txId as `0x${string}`;
 
       // Stop fast spin
       spinActiveRef.current = false;
@@ -673,17 +645,19 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
   };
 
   const advanceRoundAction = async () => {
-    if (isProcessing || isRelayerPending || winner) return;
+    if (isProcessing || isAdvancing || winner) return;
     setError(null);
     setIsProcessing(true);
     try {
       if (game?.status !== GameStatus.InProgress) throw new Error("Game is not in progress");
+      if (address?.toLowerCase() !== game?.creator.toLowerCase())
+        throw new Error("Only the game host can advance");
       if (game?.roundEnd && currentBlockNumber > 0 && currentBlockNumber < Number(game.roundEnd)) {
         const left = Number(game.roundEnd) - currentBlockNumber;
         throw new Error(`Round hasn't expired yet. ~${left} blocks remaining.`);
       }
-      showSuccess("⏭️ Advancing round on-chain…");
-      await advanceRoundRelayer(gameId);
+      showSuccess("⏭️ Advancing round…");
+      await advanceRound({ gameId });
       await refreshGameState();
       showSuccess(`⏭️ Round ${(game?.currentRound || 0) + 1} started!`);
       setIsProcessing(false);
@@ -695,59 +669,6 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
       setIsProcessing(false);
     }
   };
-
-  // Auto-advance expired rounds via relayer (no wallet signature)
-  useEffect(() => {
-    if (!canAdvanceRound() || autoAdvanceRef.current || isProcessing || winner) return;
-    autoAdvanceRef.current = true;
-    advanceRoundAction()
-      .catch(() => {})
-      .finally(() => {
-        autoAdvanceRef.current = false;
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    game?.status,
-    game?.roundEnd,
-    currentBlockNumber,
-    pendingSpin?.pending,
-    isRelayerPending,
-  ]);
-
-  // Auto-finish pending spin after on-chain reveal block
-  useEffect(() => {
-    if (
-      game?.status !== GameStatus.InProgress ||
-      !pendingSpin?.pending ||
-      isSpinExpired() ||
-      autoResolveRef.current ||
-      isProcessing ||
-      isSpinning ||
-      winner
-    ) {
-      return;
-    }
-    if (
-      currentBlockNumber > 0 &&
-      currentBlockNumber > Number(pendingSpin.commitBlock) &&
-      address?.toLowerCase() === game?.creator.toLowerCase()
-    ) {
-      autoResolveRef.current = true;
-      spinRoundAction()
-        .catch(() => {})
-        .finally(() => {
-          autoResolveRef.current = false;
-        });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    game?.status,
-    pendingSpin?.pending,
-    pendingSpin?.commitBlock,
-    currentBlockNumber,
-    address,
-    game?.creator,
-  ]);
 
   const claimPrizeAction = async () => {
     if (isProcessing || isClaiming) return;
@@ -996,23 +917,6 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                     </div>
                   )}
 
-                  {pendingSpin?.pending && !isSpinExpired() && (
-                    <div className="mb-3 p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg text-center">
-                      <p className="text-xs text-orange-300 font-semibold">
-                        {currentBlockNumber > 0 &&
-                        currentBlockNumber <= Number(pendingSpin.commitBlock)
-                          ? "⌛ Waiting for on-chain reveal…"
-                          : "🎰 Revealing outcome on-chain…"}
-                      </p>
-                      <p className="text-[10px] text-gray-400 mt-1">No wallet signature needed</p>
-                    </div>
-                  )}
-                  {pendingSpin?.pending && isSpinExpired() && (
-                    <div className="mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-center">
-                      <p className="text-xs text-red-300 font-semibold">⚠️ Spin expired — tap SPIN to retry</p>
-                    </div>
-                  )}
-
                   {game?.status === GameStatus.InProgress && game.roundEnd && (
                     <div className="mb-3 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
                       <p className="text-xs text-gray-400">Round Time Left</p>
@@ -1061,19 +965,11 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                   {isConnected && !isCreator && game?.status === GameStatus.InProgress && (
                     <div className="mb-3 p-3 bg-amber-900/20 border border-amber-500/30 rounded-lg">
                       <p className="text-xs text-amber-200 text-center">
-                        🎡 The <span className="font-bold text-white">Host</span> triggers spins (gasless for you).<br/>
+                        🎡 The <span className="font-bold text-white">Host</span> controls the spin.<br/>
                         Watch the wheel — you could be eliminated!
                       </p>
                     </div>
                   )}
-                  {isCreator && game?.status === GameStatus.InProgress && (
-                    <div className="mb-3 p-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                      <p className="text-[10px] text-blue-200 text-center">
-                        Spins run on-chain via the app relayer — you only sign create, join, and claim.
-                      </p>
-                    </div>
-                  )}
-
                   <div className="space-y-2">
                     {canJoinGame() && (
                       <button
@@ -1102,16 +998,20 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                     {canSpinRound() && (
                       <button
                         onClick={spinRoundAction}
-                        disabled={isRelayerPending || isProcessing}
-                        className={`w-full bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm shadow-lg ${isRelayerPending || isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
+                        disabled={isSpinTx || isProcessing}
+                        className={`w-full bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm shadow-lg ${isSpinTx || isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
                       >
-                        {isRelayerPending || isProcessing ? "Spinning…" : "🎡 Spin (no wallet tx)"}
+                        {isSpinTx || isProcessing ? "Spinning…" : "🎡 Spin"}
                       </button>
                     )}
                     {canAdvanceRound() && (
-                      <p className="text-xs text-center text-amber-300">
-                        Round expired — advancing automatically…
-                      </p>
+                      <button
+                        onClick={advanceRoundAction}
+                        disabled={isAdvancing || isProcessing}
+                        className={`w-full bg-gradient-to-r from-yellow-600 to-yellow-500 hover:from-yellow-700 hover:to-yellow-600 text-white font-bold py-2 px-4 rounded-lg transition-all text-sm shadow-lg ${isAdvancing || isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}
+                      >
+                        {isAdvancing || isProcessing ? "Advancing…" : "⏭️ Advance Round"}
+                      </button>
                     )}
                     {canClaimPrize() && (
                       <button
@@ -1246,9 +1146,8 @@ const WheelOfFortune: React.FC<WheelOfFortuneProps> = ({ gameId }) => {
                       }`}
                       onClick={canSpinRound() ? spinRoundAction : undefined}
                     >
-                      {isSpinning || isRelayerPending || isProcessing
+                      {isSpinning || isSpinTx || isProcessing
                         ? <span className="animate-spin text-xl">⚙️</span>
-                        : isSpinExpired() ? "RETRY"
                         : canSpinRound() ? "SPIN"
                         : game?.status === GameStatus.InProgress && !isCreator ? "LIVE"
                         : game?.status === GameStatus.Active && !isCreator ? "WAIT"

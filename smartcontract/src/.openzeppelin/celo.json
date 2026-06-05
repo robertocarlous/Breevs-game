@@ -717,6 +717,365 @@
           ]
         }
       }
+    },
+    "6cd6b2d5bcedc440020394a0f76e602b90966fd2cbc7725448d2af2244a6c10d": {
+      "address": "0x66EE641EAD1432822b319a4e186692DACb87936b",
+      "txHash": "0xc7e24b7b204bf271e7c7a3054c66bcfb65f14e15eb66ac7828db4cabf615d4b7",
+      "layout": {
+        "solcVersion": "0.8.22",
+        "storage": [
+          {
+            "label": "gameCounter",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_uint256",
+            "contract": "BreevsRussianRoulette",
+            "src": "contracts/breevs.sol:108"
+          },
+          {
+            "label": "games",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_mapping(t_uint256,t_struct(Game)2419_storage)",
+            "contract": "BreevsRussianRoulette",
+            "src": "contracts/breevs.sol:108"
+          },
+          {
+            "label": "playerGameData",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_mapping(t_uint256,t_mapping(t_address,t_struct(PlayerGameData)2424_storage))",
+            "contract": "BreevsRussianRoulette",
+            "src": "contracts/breevs.sol:108"
+          },
+          {
+            "label": "playerDeposits",
+            "offset": 0,
+            "slot": "3",
+            "type": "t_mapping(t_uint256,t_mapping(t_address,t_uint256))",
+            "contract": "BreevsRussianRoulette",
+            "src": "contracts/breevs.sol:111"
+          },
+          {
+            "label": "prizeClaimed",
+            "offset": 0,
+            "slot": "4",
+            "type": "t_mapping(t_uint256,t_bool)",
+            "contract": "BreevsRussianRoulette",
+            "src": "contracts/breevs.sol:113"
+          },
+          {
+            "label": "userStats",
+            "offset": 0,
+            "slot": "5",
+            "type": "t_mapping(t_address,t_struct(UserStats)2440_storage)",
+            "contract": "BreevsRussianRoulette",
+            "src": "contracts/breevs.sol:114"
+          },
+          {
+            "label": "pendingSpins",
+            "offset": 0,
+            "slot": "6",
+            "type": "t_mapping(t_uint256,t_struct(SpinRequest)2431_storage)",
+            "contract": "BreevsRussianRoulette",
+            "src": "contracts/breevs.sol:115"
+          },
+          {
+            "label": "gToken",
+            "offset": 0,
+            "slot": "7",
+            "type": "t_contract(IERC20)1185",
+            "contract": "BreevsRussianRoulette",
+            "src": "contracts/breevs.sol:119"
+          },
+          {
+            "label": "spinOperator",
+            "offset": 0,
+            "slot": "8",
+            "type": "t_address",
+            "contract": "BreevsRussianRoulette",
+            "src": "contracts/breevs.sol:124"
+          },
+          {
+            "label": "__gap",
+            "offset": 0,
+            "slot": "9",
+            "type": "t_array(t_uint256)49_storage",
+            "contract": "BreevsRussianRoulette",
+            "src": "contracts/breevs.sol:643"
+          }
+        ],
+        "types": {
+          "t_address": {
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_bool": {
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_struct(InitializableStorage)307_storage": {
+            "label": "struct Initializable.InitializableStorage",
+            "members": [
+              {
+                "label": "_initialized",
+                "type": "t_uint64",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_initializing",
+                "type": "t_bool",
+                "offset": 8,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(OwnableStorage)13_storage": {
+            "label": "struct OwnableUpgradeable.OwnableStorage",
+            "members": [
+              {
+                "label": "_owner",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_uint64": {
+            "label": "uint64",
+            "numberOfBytes": "8"
+          },
+          "t_array(t_address)dyn_storage": {
+            "label": "address[]",
+            "numberOfBytes": "32"
+          },
+          "t_array(t_uint256)49_storage": {
+            "label": "uint256[49]",
+            "numberOfBytes": "1568"
+          },
+          "t_contract(IERC20)1185": {
+            "label": "contract IERC20",
+            "numberOfBytes": "20"
+          },
+          "t_enum(Status)2396": {
+            "label": "enum BreevsRussianRoulette.Status",
+            "members": [
+              "CREATED",
+              "IN_PROGRESS",
+              "COMPLETED",
+              "CANCELLED"
+            ],
+            "numberOfBytes": "1"
+          },
+          "t_mapping(t_address,t_struct(PlayerGameData)2424_storage)": {
+            "label": "mapping(address => struct BreevsRussianRoulette.PlayerGameData)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_address,t_struct(UserStats)2440_storage)": {
+            "label": "mapping(address => struct BreevsRussianRoulette.UserStats)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_address,t_uint256)": {
+            "label": "mapping(address => uint256)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_bool)": {
+            "label": "mapping(uint256 => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_mapping(t_address,t_struct(PlayerGameData)2424_storage))": {
+            "label": "mapping(uint256 => mapping(address => struct BreevsRussianRoulette.PlayerGameData))",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_mapping(t_address,t_uint256))": {
+            "label": "mapping(uint256 => mapping(address => uint256))",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_struct(Game)2419_storage)": {
+            "label": "mapping(uint256 => struct BreevsRussianRoulette.Game)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_struct(SpinRequest)2431_storage)": {
+            "label": "mapping(uint256 => struct BreevsRussianRoulette.SpinRequest)",
+            "numberOfBytes": "32"
+          },
+          "t_struct(Game)2419_storage": {
+            "label": "struct BreevsRussianRoulette.Game",
+            "members": [
+              {
+                "label": "creator",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "players",
+                "type": "t_array(t_address)dyn_storage",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "stake",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "prizePool",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "status",
+                "type": "t_enum(Status)2396",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "roundDuration",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "roundEnd",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "6"
+              },
+              {
+                "label": "currentRound",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "7"
+              },
+              {
+                "label": "winner",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "8"
+              },
+              {
+                "label": "totalRounds",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "9"
+              }
+            ],
+            "numberOfBytes": "320"
+          },
+          "t_struct(PlayerGameData)2424_storage": {
+            "label": "struct BreevsRussianRoulette.PlayerGameData",
+            "members": [
+              {
+                "label": "eliminated",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "eliminationRound",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "1"
+              }
+            ],
+            "numberOfBytes": "64"
+          },
+          "t_struct(SpinRequest)2431_storage": {
+            "label": "struct BreevsRussianRoulette.SpinRequest",
+            "members": [
+              {
+                "label": "pending",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "commitBlock",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "round",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "2"
+              }
+            ],
+            "numberOfBytes": "96"
+          },
+          "t_struct(UserStats)2440_storage": {
+            "label": "struct BreevsRussianRoulette.UserStats",
+            "members": [
+              {
+                "label": "gamesPlayed",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "gamesWon",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "totalWinnings",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "totalStaked",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "3"
+              }
+            ],
+            "numberOfBytes": "128"
+          },
+          "t_uint256": {
+            "label": "uint256",
+            "numberOfBytes": "32"
+          }
+        },
+        "namespaces": {
+          "erc7201:openzeppelin.storage.Ownable": [
+            {
+              "contract": "OwnableUpgradeable",
+              "label": "_owner",
+              "type": "t_address",
+              "src": "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol:24",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.Initializable": [
+            {
+              "contract": "Initializable",
+              "label": "_initialized",
+              "type": "t_uint64",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:69",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "Initializable",
+              "label": "_initializing",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:73",
+              "offset": 8,
+              "slot": "0"
+            }
+          ]
+        }
+      }
     }
   }
 }

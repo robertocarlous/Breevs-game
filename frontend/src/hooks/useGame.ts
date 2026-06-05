@@ -23,7 +23,6 @@ import {
   isPrizeClaimed,
   isUserInGame,
   isGameCreator,
-  getPendingSpin,
   getGDBalance,
   getGDAllowance,
   getGDIdentityStatus,
@@ -33,8 +32,7 @@ import {
   cancelGameArgs,
   joinGameArgs,
   startGameArgs,
-  requestSpinArgs,
-  resolveSpinArgs,
+  spinRoundArgs,
   advanceRoundArgs,
   claimPrizeArgs,
   claimGDArgs,
@@ -44,13 +42,12 @@ import {
   GameInfo,
   PlayerData,
   UserStats,
-  SpinRequest,
 } from "@/lib/contractCalls";
 import { useGameStore } from "@/store/gameStore";
 
 // ─── Re-export types ──────────────────────────────────────────────────────────
 export { GameStatus };
-export type { GameInfo, PlayerData, UserStats, SpinRequest };
+export type { GameInfo, PlayerData, UserStats };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // READ HOOKS
@@ -113,16 +110,6 @@ export function useIsUserInGame(gameId: bigint, user: string) {
     queryKey: ["isUserInGame", gameId.toString(), user],
     queryFn: () => isUserInGame(gameId, user),
     enabled: !!gameId && !!user,
-  });
-}
-
-export function usePendingSpin(gameId: bigint) {
-  return useQuery<SpinRequest, Error>({
-    queryKey: ["pendingSpin", gameId.toString()],
-    queryFn: () => getPendingSpin(gameId),
-    enabled: !!gameId && gameId > 0n,
-    refetchInterval: 2000,
-    staleTime: 0,
   });
 }
 
@@ -429,7 +416,7 @@ export function useStartGame() {
   return { mutateAsync, isPending, error };
 }
 
-export function useRequestSpin() {
+export function useSpinRound() {
   const { writeContractAsync, invalidate } = useContractWrite();
   const qc = useQueryClient();
   const [isPending, setIsPending] = useState(false);
@@ -439,36 +426,9 @@ export function useRequestSpin() {
     setIsPending(true);
     setError(null);
     try {
-      const hash = await writeContractAsync(requestSpinArgs(gameId));
+      const hash = await writeContractAsync(spinRoundArgs(gameId));
       invalidate();
-      qc.invalidateQueries({ queryKey: ["pendingSpin", gameId.toString()] });
-      return { txId: hash };
-    } catch (err: unknown) {
-      const mapped = mapContractError(err);
-      const e = new Error(mapped.message);
-      setError(e);
-      throw e;
-    } finally {
-      setIsPending(false);
-    }
-  };
-
-  return { mutateAsync, isPending, error };
-}
-
-export function useResolveSpin() {
-  const { writeContractAsync, invalidate } = useContractWrite();
-  const qc = useQueryClient();
-  const [isPending, setIsPending] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
-  const mutateAsync = async ({ gameId }: { gameId: bigint }) => {
-    setIsPending(true);
-    setError(null);
-    try {
-      const hash = await writeContractAsync(resolveSpinArgs(gameId));
-      invalidate();
-      qc.invalidateQueries({ queryKey: ["pendingSpin", gameId.toString()] });
+      qc.invalidateQueries({ queryKey: ["gameInfo", gameId.toString()] });
       return { txId: hash };
     } catch (err: unknown) {
       const mapped = mapContractError(err);
@@ -589,5 +549,4 @@ export function useClaimGD() {
   return { mutateAsync, isPending, error };
 }
 
-// Legacy alias
-export const useSpin = useRequestSpin;
+export const useSpin = useSpinRound;
