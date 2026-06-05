@@ -14,12 +14,12 @@ const STEPS = [
   {
     num: "01",
     title: "Connect Your Wallet",
-    body: "Use any Celo-compatible wallet — MetaMask, Valora, or WalletConnect. You need CELO to stake.",
+    body: "Use any Celo-compatible wallet — MetaMask, Valora, or WalletConnect. You need G$ to stake.",
   },
   {
     num: "02",
     title: "Enter a Game Room",
-    body: "Pick an open room and stake your CELO to claim a seat, or create your own room and wait for up to 5 challengers.",
+    body: "Pick an open room and stake your G$ to claim a seat, or create your own room and wait for up to 5 challengers.",
   },
   {
     num: "03",
@@ -34,13 +34,13 @@ const STEPS = [
   {
     num: "05",
     title: "Last One Standing Wins",
-    body: "The final survivor claims the entire prize pool — every player's stake, combined. No house cut. No fees. All CELO.",
+    body: "The final survivor claims the entire prize pool — every player's stake, combined. No house cut. No fees. All G$.",
   },
 ];
 
 const RULES = [
   "2 to 6 players per room",
-  "Minimum stake 0.2 CELO · Maximum 5 CELO",
+  "Minimum stake 0.2 G$ · Maximum 5 G$",
   "Every player stakes the same amount",
   "One elimination per round, decided by on-chain randomness",
   "Prize pool equals all stakes combined",
@@ -134,7 +134,7 @@ export default function HowToPlayModal({ isOpen, onClose }: HowToPlayModalProps)
             <div className="flex items-center gap-3 px-7 py-3 border-b border-red-900/30 bg-red-950/10">
               <div className="w-1 h-1 rounded-full bg-red-500 animate-pulse shrink-0" />
               <p className="text-red-400/80 text-[10px] uppercase tracking-widest">
-                Real CELO · All transactions irreversible · Play responsibly
+                Real G$ · All transactions irreversible · Play responsibly
               </p>
             </div>
 

@@ -8,7 +8,12 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { celo } from "viem/chains";
-import { BREEVS_ABI, CONTRACT_ADDRESS } from "@/lib/contractCalls";
+import { BREEVS_ABI } from "@/lib/BreevsABI";
+
+// contractCalls.ts is "use client" — read address from env on the server
+const CONTRACT_ADDRESS = (
+  process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || ""
+) as `0x${string}`;
 
 const REVEAL_DELAY = 1n;
 const MAX_WAIT_MS = 45_000;
@@ -48,28 +53,11 @@ async function waitForBlock(
   throw new Error("Timed out waiting for on-chain reveal block");
 }
 
-async function sendSpin(
-  wallet: ReturnType<typeof createWalletClient>,
-  gameId: bigint
-) {
-  return wallet.writeContract({
-    address: CONTRACT_ADDRESS,
-    abi: BREEVS_ABI,
-    functionName: "spin",
-    args: [gameId],
-    chain: celo,
-  });
-}
-
 export async function POST(req: NextRequest) {
   const key = parseRelayerKey();
   if (!key) {
     return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "Spin relayer not configured (set SPIN_RELAYER_PRIVATE_KEY on the server)",
-      },
+      { ok: false, error: "Spin relayer not configured (set SPIN_RELAYER_PRIVATE_KEY on the server)" },
       { status: 503 }
     );
   }
@@ -89,15 +77,12 @@ export async function POST(req: NextRequest) {
   const action = body.action === "advance" ? "advance" : "execute";
   const account = privateKeyToAccount(key);
   const publicClient = getPublicClient();
-  const wallet = createWalletClient({
-    account,
-    chain: celo,
-    transport: http(
-      process.env.CELO_RPC_URL ||
-        process.env.NEXT_PUBLIC_CELO_RPC_URL ||
-        "https://forno.celo.org"
-    ),
-  });
+  const rpc = process.env.CELO_RPC_URL || process.env.NEXT_PUBLIC_CELO_RPC_URL || "https://forno.celo.org";
+  const wallet = createWalletClient({ account, chain: celo, transport: http(rpc) });
+
+  // Inline spin call — avoids generic type loss from helper function parameter
+  const spin = (gId: bigint) =>
+    wallet.writeContract({ address: CONTRACT_ADDRESS, abi: BREEVS_ABI, functionName: "spin", args: [gId], chain: celo });
 
   try {
     if (action === "advance") {
@@ -123,7 +108,7 @@ export async function POST(req: NextRequest) {
     let resolveTxHash: Hex | undefined;
 
     if (!pending.pending) {
-      commitTxHash = await sendSpin(wallet, gameId);
+      commitTxHash = await spin(gameId);
       await publicClient.waitForTransactionReceipt({ hash: commitTxHash });
 
       const afterCommit = (await publicClient.readContract({
@@ -146,17 +131,12 @@ export async function POST(req: NextRequest) {
       await waitForBlock(publicClient, pending.commitBlock + REVEAL_DELAY);
     }
 
-    resolveTxHash = await sendSpin(wallet, gameId);
+    resolveTxHash = await spin(gameId);
     await publicClient.waitForTransactionReceipt({ hash: resolveTxHash });
 
-    return NextResponse.json({
-      ok: true,
-      commitTxHash,
-      resolveTxHash,
-    });
+    return NextResponse.json({ ok: true, commitTxHash, resolveTxHash });
   } catch (err: unknown) {
-    const message =
-      err instanceof Error ? err.message : "Spin relayer transaction failed";
+    const message = err instanceof Error ? err.message : "Spin relayer transaction failed";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

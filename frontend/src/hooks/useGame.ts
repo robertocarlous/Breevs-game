@@ -8,6 +8,7 @@ import {
 import { useWriteContract, useAccount, useSwitchChain, useChainId } from "wagmi";
 import { celo } from "wagmi/chains";
 import { parseEventLogs } from "viem";
+import { approveViaPermit } from "@/hooks/useGoodDollar";
 import { useState, useEffect } from "react";
 import {
   publicClient,
@@ -307,7 +308,7 @@ function useContractWrite() {
       await switchChainAsync({ chainId: celo.id });
     }
     const hash = await _write(args);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
     if (receipt.status === "reverted") {
       try {
         await publicClient.simulateContract({ ...args, account: address });
@@ -322,7 +323,9 @@ function useContractWrite() {
   return { writeContractAsync, invalidate, address };
 }
 
-/** Checks current G$ allowance and approves if needed before a game action. */
+/** Ensures G$ allowance. Tries permit (off-chain signature) first; if the
+ *  user denies or the wallet doesn't support it, falls back to a regular
+ *  approve() transaction which is always supported. */
 async function ensureGDApproval(
   writeContractAsync: ReturnType<typeof useContractWrite>["writeContractAsync"],
   owner: string,
@@ -335,9 +338,20 @@ async function ensureGDApproval(
     args: [owner as `0x${string}`, CONTRACT_ADDRESS],
   }) as bigint;
 
-  if (allowance < amount) {
+  if (allowance >= amount) return;
+
+  try {
+    await approveViaPermit(owner as `0x${string}`);
+  } catch (permitErr: unknown) {
+    const msg = permitErr instanceof Error ? permitErr.message : "";
+    // If the user explicitly rejected the signature, re-throw immediately
+    // so the caller's error handler can show "rejected by user".
+    if (msg.includes("denied") || msg.includes("rejected") || msg.includes("4001")) {
+      throw permitErr;
+    }
+    // For any other permit failure (wallet doesn't support typed-data, relay
+    // error, etc.) fall back to a standard approve() transaction.
     await writeContractAsync(approveGDArgs(amount));
-    // Invalidate allowance cache
   }
 }
 

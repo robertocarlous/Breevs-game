@@ -457,7 +457,7 @@ function Achievements({ address }: { address: string }) {
     { id: "first_blood", symbol: "🩸", label: "First Blood",  desc: "Play 1 game",       unlocked: gamesPlayed >= 1 },
     { id: "survivor",    symbol: "💀", label: "Survivor",     desc: "Play 3 games",       unlocked: gamesPlayed >= 3 },
     { id: "champion",    symbol: "🏆", label: "Champion",     desc: "Win 1 game",         unlocked: gamesWon >= 1 },
-    { id: "high_roller", symbol: "💎", label: "High Roller",  desc: "Win 10+ CELO",       unlocked: totalWinnings >= BigInt(10e18) },
+    { id: "high_roller", symbol: "💎", label: "High Roller",  desc: "Win 10+ G$",         unlocked: totalWinnings >= BigInt(10e18) },
     { id: "veteran",     symbol: "⭐", label: "Veteran",      desc: "Play 5 games",       unlocked: gamesPlayed >= 5 },
     { id: "legend",      symbol: "👑", label: "Legend",       desc: "Win 3 games",        unlocked: gamesWon >= 3 },
   ];
@@ -733,7 +733,7 @@ function FreeTrialModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
     },
     {
       name: "Player",
-      price: "0.2 CELO",
+      price: "0.2 G$",
       priceNote: "Min stake per game",
       highlight: true,
       perks: [

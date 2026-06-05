@@ -10,7 +10,7 @@ You've watched every spin. You know every player by name. You feel every elimina
 Hard rules — never break these:
 - Maximum 3 sentences. Punchy. No fluff.
 - Use the real player names (Host, Player 2, etc.) whenever you have them. Never say "a player".
-- Reference the exact CELO amount and round number. Numbers make it real.
+- Reference the exact G$ amount and round number. Numbers make it real.
 - NEVER say "tension rises", "stakes are high", "the air is thick" or any cliché — show the emotion, don't label it.
 - Sentence fragments are fine. Incomplete sentences for impact are fine. "Gone. Just like that."
 - Speak in present tense. This is happening NOW.
@@ -21,7 +21,7 @@ Hard rules — never break these:
 
 const EVENT_INSTRUCTIONS: Record<string, string> = {
   game_started:
-    "The game has JUST started. All 6 players locked their CELO into the smart contract and the wheel is ready. Set the scene — introduce the stakes, the crowd, the vibe. Make it feel like the opening of a championship bout.",
+    "The game has JUST started. All 6 players locked their G$ into the smart contract and the wheel is ready. Set the scene — introduce the stakes, the crowd, the vibe. Make it feel like the opening of a championship bout.",
   player_eliminated:
     "A player was JUST eliminated. React like you watched it happen live — shock, the sound of the wheel, the realisation. Name them. Tell us who's still standing.",
   last_two_remaining:
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
       event_type === "player_eliminated" && last_eliminated_name
         ? `${last_eliminated_name} was JUST eliminated in round ${current_round}.`
         : event_type === "game_ended" && winner_name
-        ? `${winner_name} just won it all — ${prize_pool} CELO transferred to their wallet.`
+        ? `${winner_name} just won it all — ${prize_pool} G$ transferred to their wallet.`
         : event_type === "last_two_remaining"
         ? `Only two left: ${survivorsLine}.`
         : "";
@@ -88,7 +88,7 @@ ${specificContext}
 
 Game facts you must use:
 - Game #${game_id} | Round ${current_round} | ${active_players}/${total_players} players left
-- Prize pool: ${prize_pool} CELO
+- Prize pool: ${prize_pool} G$
 - Still standing: ${survivorsLine}
 - ${eliminatedLine}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { createPublicClient, http, fallback, parseEther, formatEther } from "viem";
+import { createPublicClient, http, fallback, parseEther, formatEther, maxUint256 } from "viem";
 import { celo } from "wagmi/chains";
 import { BREEVS_ABI } from "./BreevsABI";
 export { BREEVS_ABI };
@@ -365,13 +365,16 @@ export async function getGDClaimEntitlement(address: string): Promise<bigint> {
 
 // ─── WRITE FUNCTION ARG BUILDERS ─────────────────────────────────────────────
 
-export function approveGDArgs(amount: bigint) {
+export function approveGDArgs(_amount: bigint) {
   return {
     address: GD_TOKEN_ADDRESS,
     abi: ERC20_ABI,
     functionName: "approve" as const,
-    args: [CONTRACT_ADDRESS, amount] as const,
+    // Approve max once — avoids repeated relay calls for every game
+    args: [CONTRACT_ADDRESS, maxUint256] as const,
     chain: celo,
+    // G$ token calls an internal relay during approve; needs extra gas
+    gas: 300000n,
   };
 }
 

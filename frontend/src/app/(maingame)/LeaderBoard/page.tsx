@@ -68,7 +68,7 @@ type SortKey = "winrate" | "winnings" | "games";
 
 const SORT_OPTS: { key: SortKey; label: string; icon: React.ReactNode }[] = [
   { key: "winrate",  label: "Survival Rate", icon: <Percent  className="w-3.5 h-3.5" /> },
-  { key: "winnings", label: "CELO Earned",   icon: <Coins    className="w-3.5 h-3.5" /> },
+  { key: "winnings", label: "G$ Earned",      icon: <Coins    className="w-3.5 h-3.5" /> },
   { key: "games",    label: "Matches",        icon: <Swords   className="w-3.5 h-3.5" /> },
 ];
 
@@ -238,7 +238,7 @@ export default function LeaderboardPage() {
               <span className="hidden sm:block text-[10px] text-gray-700 uppercase tracking-widest text-right">Survival</span>
               <span className="hidden sm:block text-[10px] text-gray-700 uppercase tracking-widest text-right">W / G</span>
               <span className="text-[10px] text-gray-700 uppercase tracking-widest text-right">
-                {sort === "winnings" ? "CELO" : sort === "games" ? "Matches" : "Rate"}
+                {sort === "winnings" ? "G$" : sort === "games" ? "Matches" : "Rate"}
               </span>
             </div>
 
@@ -393,7 +393,7 @@ export default function LeaderboardPage() {
 
                       <div className="text-right shrink-0">
                         <p className={`text-sm font-black ${rankText(rank)}`}>{fmt(p.totalWinnings)}</p>
-                        <p className="text-[9px] text-gray-700">CELO</p>
+                        <p className="text-[9px] text-gray-700">G$</p>
                       </div>
                     </div>
                   );

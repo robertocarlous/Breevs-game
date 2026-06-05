@@ -176,7 +176,7 @@ export default function StartScreen() {
           </span>
           <span className="text-gray-500">·</span>
           <span>
-            <span className="text-white font-black">0.2 CELO</span>
+            <span className="text-white font-black">0.2 G$</span>
             <span className="text-gray-600 ml-1">min</span>
           </span>
           <span className="text-gray-500">·</span>

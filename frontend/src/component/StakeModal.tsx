@@ -112,9 +112,14 @@ const StakeModal: React.FC<StakeModalProps> = ({ isOpen, onClose, onSuccess }) =
         router.push(`/GameScreen/${gameId}`);
       }
     } catch (err: any) {
-      const errorMessage = err.message?.includes("rejected")
-        ? "Transaction rejected by user"
-        : err.message || "Failed to stake";
+      const msg: string = err.message || "";
+      const errorMessage = msg.includes("rejected") || msg.includes("denied")
+        ? "Approval or transaction rejected. Please approve both the G$ spending permission and the join transaction in your wallet."
+        : msg.includes("FAILED_TIMEOUT") || msg.includes("relay error") || msg.includes("relay")
+        ? "G$ network relay timed out. Please wait a few seconds and try again."
+        : msg.includes("insufficient") || msg.includes("balance")
+        ? "Insufficient G$ balance to stake."
+        : msg || "Failed to stake";
       showErrorToast(errorMessage, "Stake Error");
       setTxId(null);
     }
@@ -136,7 +141,7 @@ const StakeModal: React.FC<StakeModalProps> = ({ isOpen, onClose, onSuccess }) =
           <h2 className="text-xl sm:text-2xl font-bold text-white mb-1 tracking-tight">
             Join Game
           </h2>
-          <p className="text-xs text-gray-500">Stake CELO to enter and compete</p>
+          <p className="text-xs text-gray-500">Stake G$ to enter and compete</p>
         </div>
 
         {/* Stake amount */}
@@ -145,7 +150,7 @@ const StakeModal: React.FC<StakeModalProps> = ({ isOpen, onClose, onSuccess }) =
           <p className="text-4xl font-bold text-red-500 drop-shadow-lg">
             {stakeDisplay}
           </p>
-          <p className="text-xs text-gray-500 mt-1">CELO</p>
+          <p className="text-xs text-gray-500 mt-1">G$</p>
         </div>
 
         {/* Game info */}
@@ -163,7 +168,7 @@ const StakeModal: React.FC<StakeModalProps> = ({ isOpen, onClose, onSuccess }) =
             <div className="h-px bg-white/5" />
             <div className="flex justify-between items-center">
               <span className="text-xs text-gray-500">Prize Pool</span>
-              <span className="text-xs font-bold text-amber-400">{prizeDisplay} CELO</span>
+              <span className="text-xs font-bold text-amber-400">{prizeDisplay} G$</span>
             </div>
           </div>
         )}
@@ -210,7 +215,7 @@ const StakeModal: React.FC<StakeModalProps> = ({ isOpen, onClose, onSuccess }) =
               Processing...
             </span>
           ) : isConnected ? (
-            `Stake ${stakeDisplay} CELO & Join`
+            `Stake ${stakeDisplay} G$ & Join`
           ) : (
             "Connect Wallet"
           )}
