@@ -110,118 +110,123 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
   const shortWinner = game.winner?.startsWith("0x") ? shortAddr(game.winner) : null;
   const playerCount = Number(game.playerCount);
 
-  /* ── Status colour system ────────────────────────────────────────
-     Each state has ONE clear identity colour with real contrast.
-     Backgrounds stay neutral-dark (navy-black) to match the app.
-     No warm brown tints — brown clashes with the navy app shell.
-  ── */
+  // ── Brand accent colour (rgb) per status ─────────────────────────
   const [sr, sg, sb] = (
-    isCancelled   ? "88,88,96"     :  // neutral grey
-    isEnded       ? "65,140,210"   :  // steel blue  — past/resolved
-    isInProgress  ? "215,120,20"   :  // vivid amber — live/hot
-    isGameCreator ? "190,160,35"   :  // gold        — host authority
-                    "205,40,40"       // clean red   — open/join
+    isCancelled   ? "80,88,110"    :  // muted slate
+    isEnded       ? "65,140,210"   :  // steel blue — resolved
+    isInProgress  ? "215,120,20"   :  // vivid amber — live
+    isGameCreator ? "190,160,35"   :  // gold — host
+                    "210,38,38"       // brand red — open
   ).split(",").map(Number);
+
+  // Navy base used in all card backgrounds
+  const NAVY = "linear-gradient(160deg, #0C1440 0%, #070A1C 50%, #080C22 100%)";
 
   const T = (() => {
     if (isCancelled) return {
-      bg:            "#08090E",
-      glowColor:     "rgba(88,88,96,0.10)",
+      bg:            "linear-gradient(160deg, #070912 0%, #050709 100%)",
+      glowColor:     "rgba(80,88,110,0.12)",
       badge:         "text-slate-500 border-slate-700/30 bg-slate-900/20",
       dot:           "bg-slate-600",
       label:         "Cancelled",
-      priceColor:    "#606070",
-      noteColor:     "#484858",
-      chamberFill:   "rgba(20,20,28,0.90)",
-      chamberStroke: "rgba(70,70,80,0.30)",
-      bulletFill:    "rgba(70,70,80,0.55)",
+      priceColor:    "#5a6070",
+      noteColor:     "#40464e",
+      chamberFill:   "rgba(18,20,30,0.92)",
+      chamberStroke: "rgba(65,70,90,0.30)",
+      bulletFill:    "rgba(65,70,90,0.55)",
       ctaBg:         "bg-white/5 hover:bg-white/8 text-slate-500",
       ctaText:       "View",
       logoOpacity:   "opacity-10 grayscale",
     };
     if (isEnded) return {
-      bg:            "#06080F",
-      glowColor:     "rgba(65,140,210,0.18)",
+      bg:            "linear-gradient(160deg, #090E22 0%, #060A1A 55%, #070C1E 100%)",
+      glowColor:     "rgba(65,140,210,0.25)",
       badge:         "text-sky-400/80 border-sky-700/30 bg-sky-950/20",
       dot:           "bg-sky-400",
       label:         "Ended",
       priceColor:    "#5aabdc",
       noteColor:     "#3a8abf",
-      chamberFill:   "rgba(10,18,35,0.85)",
-      chamberStroke: "rgba(65,140,210,0.45)",
-      bulletFill:    "rgba(65,140,210,0.80)",
+      chamberFill:   "rgba(8,14,32,0.90)",
+      chamberStroke: "rgba(65,140,210,0.52)",
+      bulletFill:    "rgba(65,140,210,0.88)",
       ctaBg:         "bg-sky-950/25 hover:bg-sky-900/35 text-sky-400",
       ctaText:       "View Result",
       logoOpacity:   "opacity-25",
     };
     if (isInProgress) return {
-      bg:            "#0A0806",
-      glowColor:     "rgba(215,120,20,0.18)",
-      badge:         isGameCreator
-        ? "text-amber-400/80 border-amber-700/30 bg-amber-950/15"
-        : "text-orange-400/80 border-orange-700/30 bg-orange-950/15",
-      dot:           "bg-orange-400 animate-pulse",
+      bg:            "linear-gradient(160deg, #0A0E22 0%, #07091C 55%, #080B1E 100%)",
+      glowColor:     "rgba(215,120,20,0.28)",
+      badge:         "text-amber-400/80 border-amber-700/30 bg-amber-950/15",
+      dot:           "bg-amber-400 animate-pulse",
       label:         isGameCreator ? "Your Game" : "In Progress",
       priceColor:    "#d07818",
-      noteColor:     "#b06010",
-      chamberFill:   "rgba(30,14,4,0.88)",
-      chamberStroke: "rgba(215,120,20,0.55)",
-      bulletFill:    "rgba(215,120,20,0.90)",
-      ctaBg:         "bg-orange-950/20 hover:bg-orange-900/30 text-orange-400",
+      noteColor:     "#c09030",
+      chamberFill:   "rgba(12,10,6,0.92)",
+      chamberStroke: "rgba(215,120,20,0.58)",
+      bulletFill:    "rgba(215,120,20,0.92)",
+      ctaBg:         "bg-amber-950/20 hover:bg-amber-900/30 text-amber-400",
       ctaText:       isGameCreator ? "Manage" : isUserGame ? "Rejoin" : "Watch",
       logoOpacity:   "opacity-25",
     };
     const host = !!isGameCreator;
     return {
-      bg:            "#090810",
-      glowColor:     host ? "rgba(190,160,35,0.18)" : "rgba(205,40,40,0.22)",
+      bg:            NAVY,
+      glowColor:     host ? "rgba(190,160,35,0.30)" : "rgba(210,38,38,0.35)",
       badge:         host
         ? "text-amber-400/80 border-amber-700/30 bg-amber-950/15"
-        : "text-emerald-400/80 border-emerald-700/30 bg-emerald-950/15",
-      dot:           host ? "bg-amber-400" : "bg-emerald-400 animate-pulse",
+        : "text-red-400/80 border-red-700/30 bg-red-950/15",
+      dot:           host ? "bg-amber-400" : "bg-red-400 animate-pulse",
       label:         host ? "HOST" : "OPEN",
       priceColor:    host ? "#c8a820" : "#e02828",
-      noteColor:     host ? "#a08818" : "#c01818",
-      chamberFill:   host ? "rgba(28,22,4,0.88)"  : "rgba(35,5,5,0.88)",
-      chamberStroke: host ? "rgba(190,160,35,0.58)" : "rgba(205,40,40,0.65)",
-      bulletFill:    host ? "rgba(190,160,35,0.92)" : "rgba(205,40,40,0.95)",
+      noteColor:     host ? "#a08818" : "#e05050",
+      chamberFill:   host ? "rgba(20,16,4,0.92)"   : "rgba(28,5,8,0.92)",
+      chamberStroke: host ? "rgba(190,160,35,0.65)" : "rgba(210,38,38,0.72)",
+      bulletFill:    host ? "rgba(190,160,35,0.96)" : "rgba(210,38,38,0.98)",
       ctaBg: host
         ? "bg-amber-950/20 hover:bg-amber-900/30 text-amber-400"
         : isUserGame
         ? "bg-sky-950/20 hover:bg-sky-900/30 text-sky-400"
         : !address
         ? "bg-white/5 hover:bg-white/8 text-slate-400 border border-white/8"
-        : "bg-gradient-to-r from-red-700 to-red-600 hover:from-red-600 hover:to-red-500 text-white",
+        : "bg-gradient-to-r from-red-700 to-red-600 hover:from-red-600 hover:to-red-500 text-white shadow-lg shadow-red-900/40",
       ctaText: host ? "Manage" : isUserGame ? "Rejoin" : !address ? "Connect to Join" : "Join Game",
       logoOpacity: "opacity-30",
     };
   })();
 
   const is3D = hovered && !isJoinDisabled;
-  const maxTilt = 18;
-  const lightAngle = 135 + (tilt.y / maxTilt) * 40 - (tilt.x / maxTilt) * 28;
+  const maxTilt = 22;
+  const lightAngle = 135 + (tilt.y / maxTilt) * 45 - (tilt.x / maxTilt) * 32;
   const lightIntensity = Math.sqrt(tilt.x * tilt.x + tilt.y * tilt.y) / maxTilt;
-  const shadowX = is3D ? tilt.y * 3 : 0;
-  const shadowY = is3D ? -tilt.x * 3 + 24 : 8;
+  const shadowX = is3D ? tilt.y * 2.8 : 0;
+  const shadowY = is3D ? -tilt.x * 2.8 + 28 : 8;
 
   const cardTransform = is3D
-    ? `perspective(600px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) translateZ(32px) translateY(-8px) scale(1.03)`
-    : "perspective(600px) rotateX(0deg) rotateY(0deg) translateZ(0px) translateY(0px) scale(1)";
+    ? `perspective(460px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) translateZ(46px) translateY(-14px) scale(1.05)`
+    : "perspective(460px) rotateX(0deg) rotateY(0deg) translateZ(0px) translateY(0px) scale(1)";
 
   const outerGlow = is3D
-    ? `${shadowX}px ${shadowY}px 50px rgba(0,0,0,0.85), 0 0 22px ${T.glowColor}`
-    : `0px 6px 28px rgba(0,0,0,0.65), 0 0 10px ${T.glowColor}`;
+    ? `${shadowX}px ${shadowY}px 90px rgba(0,0,0,0.96),
+       ${shadowX * 0.4}px ${shadowY * 0.4}px 32px rgba(0,0,0,0.80),
+       0 0 60px ${T.glowColor},
+       0 0 140px rgba(${sr},${sg},${sb},0.07)`
+    : `0px 8px 40px rgba(0,0,0,0.80), 0 0 18px ${T.glowColor}`;
 
+  // Border: accent colour woven with brand navy — gives a metallic two-tone frame
   const borderGradient = isInactive
-    ? `linear-gradient(135deg, rgba(70,70,80,0.30) 0%, rgba(40,40,50,0.08) 30%, rgba(65,65,75,0.24) 60%, rgba(38,38,48,0.08) 100%)`
+    ? `linear-gradient(135deg,
+        rgba(50,58,95,0.30) 0%,
+        rgba(30,38,72,0.08) 40%,
+        rgba(50,58,95,0.24) 100%
+      )`
     : `linear-gradient(135deg,
-        rgba(${sr},${sg},${sb},0.62) 0%,
-        rgba(${sr},${sg},${sb},0.16) 20%,
-        rgba(${sr},${sg},${sb},0.50) 40%,
-        rgba(${sr},${sg},${sb},0.12) 55%,
-        rgba(${sr},${sg},${sb},0.55) 75%,
-        rgba(${sr},${sg},${sb},0.16) 90%,
-        rgba(${sr},${sg},${sb},0.60) 100%
+        rgba(${sr},${sg},${sb},0.95) 0%,
+        rgba(11,20,69,0.65)          12%,
+        rgba(${sr},${sg},${sb},0.65) 26%,
+        rgba(5,10,28,1.00)           46%,
+        rgba(${sr},${sg},${sb},0.65) 64%,
+        rgba(11,20,69,0.65)          80%,
+        rgba(${sr},${sg},${sb},0.95) 100%
       )`;
 
   const corners = [
@@ -240,7 +245,7 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
       onMouseMove={handleMouseMove}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      style={{ perspective: "600px", transformStyle: "preserve-3d" }}
+      style={{ perspective: "460px", transformStyle: "preserve-3d" }}
     >
       <motion.div
         initial={{ opacity: 0, y: 14 }}
@@ -252,8 +257,8 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
           transform: cardTransform,
           boxShadow: outerGlow,
           background: borderGradient,
-          padding: is3D ? "2.5px" : "2px",
-          transition: "transform 0.16s cubic-bezier(0.23,1,0.32,1), box-shadow 0.16s ease, padding 0.16s ease",
+          padding: is3D ? "3px" : "2.5px",
+          transition: "transform 0.14s cubic-bezier(0.23,1,0.32,1), box-shadow 0.14s ease, padding 0.14s ease",
         }}
         className={`relative rounded-[20px] cursor-pointer ${isJoinDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
       >
@@ -264,13 +269,13 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
             className="absolute z-40 pointer-events-none card-corner-gem"
             style={{
               ...pos,
-              width: 10,
-              height: 10,
+              width: 12,
+              height: 12,
               backgroundColor: T.priceColor,
               transform: "rotate(45deg)",
-              opacity: isInactive ? 0.15 : 0.7,
-              boxShadow: `0 0 5px ${T.priceColor}88, 0 0 10px ${T.priceColor}33`,
-              border: `1px solid rgba(255,255,255,0.15)`,
+              opacity: isInactive ? 0.15 : 0.80,
+              boxShadow: `0 0 8px ${T.priceColor}BB, 0 0 18px ${T.priceColor}44`,
+              border: `1px solid rgba(255,255,255,0.20)`,
             }}
           />
         ))}
@@ -280,46 +285,65 @@ export default function GameCard({ game, error, clearError, onClick }: GameCardP
           className="relative rounded-[17px] overflow-hidden h-full"
           style={{ background: T.bg }}
         >
+          {/* Subtle dot-grid — premium card texture */}
+          <div
+            className="absolute inset-0 pointer-events-none z-[0]"
+            style={{
+              backgroundImage: `radial-gradient(circle at 1px 1px, rgba(255,255,255,0.025) 1px, transparent 0)`,
+              backgroundSize: "18px 18px",
+              opacity: isInactive ? 0.35 : 0.7,
+            }}
+          />
+
           {/* Directional lighting */}
           <div
             className="absolute inset-0 pointer-events-none z-[1]"
             style={{
               background: `linear-gradient(${lightAngle}deg,
-                rgba(255,255,255,${is3D ? 0.055 + lightIntensity * 0.07 : 0.03}) 0%,
+                rgba(255,255,255,${is3D ? 0.07 + lightIntensity * 0.09 : 0.035}) 0%,
                 transparent 45%,
-                rgba(0,0,0,${is3D ? 0.05 + lightIntensity * 0.05 : 0.02}) 100%
+                rgba(0,0,0,${is3D ? 0.07 + lightIntensity * 0.06 : 0.025}) 100%
               )`,
-              transition: "background 0.08s ease",
+              transition: "background 0.07s ease",
             }}
           />
 
-          {/* Shimmer + specular */}
+          {/* Shimmer + specular + holo on hover */}
           {is3D && (
             <>
+              {/* Holographic foil sweep */}
+              <div className="absolute inset-0 z-[2] pointer-events-none card-holo" />
+              {/* Radial cursor shimmer */}
               <div
-                className="absolute inset-0 z-[2] pointer-events-none"
+                className="absolute inset-0 z-[3] pointer-events-none"
                 style={{
-                  background: `radial-gradient(ellipse 55% 45% at ${shimmer.x}% ${shimmer.y}%,
-                    rgba(255,255,255,0.10) 0%, rgba(${sr},${sg},${sb},0.05) 40%, transparent 70%)`,
+                  background: `radial-gradient(ellipse 60% 50% at ${shimmer.x}% ${shimmer.y}%,
+                    rgba(255,255,255,0.12) 0%, rgba(${sr},${sg},${sb},0.06) 40%, transparent 70%)`,
                   mixBlendMode: "screen",
                 }}
               />
+              {/* Specular hot-spot */}
               <div
-                className="absolute pointer-events-none z-[3]"
+                className="absolute pointer-events-none z-[4]"
                 style={{
-                  width: 80, height: 80, borderRadius: "50%",
-                  background: "radial-gradient(circle, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.05) 45%, transparent 70%)",
-                  left: `calc(${shimmer.x}% - 40px)`,
-                  top: `calc(${shimmer.y}% - 40px)`,
+                  width: 90, height: 90, borderRadius: "50%",
+                  background: "radial-gradient(circle, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.06) 45%, transparent 70%)",
+                  left: `calc(${shimmer.x}% - 45px)`,
+                  top: `calc(${shimmer.y}% - 45px)`,
                   mixBlendMode: "screen",
                 }}
               />
             </>
           )}
 
-          {/* Top edge highlight */}
-          <div className="absolute top-0 left-0 right-0 h-px pointer-events-none z-[4]"
-            style={{ background: `linear-gradient(to right, transparent, rgba(${sr},${sg},${sb},${is3D ? 0.6 : 0.25}), transparent)` }}
+          {/* Brand red top stripe — always visible identity mark */}
+          <div className="absolute top-0 left-0 right-0 h-[2px] pointer-events-none z-[5]"
+            style={{ background: "linear-gradient(to right, transparent 6%, rgba(200,35,35,0.95) 26%, rgba(220,48,48,1) 50%, rgba(200,35,35,0.95) 74%, transparent 94%)" }}
+          />
+
+          {/* Status-tinted top edge (sits above the red stripe, subtle) */}
+          <div className="absolute top-[2px] left-0 right-0 h-px pointer-events-none z-[5]"
+            style={{ background: `linear-gradient(to right, transparent, rgba(${sr},${sg},${sb},${is3D ? 0.5 : 0.18}), transparent)` }}
           />
 
           {/* Disabled overlay */}

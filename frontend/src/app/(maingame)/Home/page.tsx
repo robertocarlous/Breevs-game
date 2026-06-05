@@ -13,10 +13,12 @@ import GameFilter from "@/component/GameFilter";
 import CreateGameModal from "@/component/CreateGameModal";
 import StakeModal from "@/component/StakeModal";
 import { useActiveGames, useMyGames, useGameStatus, useUserStats, useTotalGames } from "@/hooks/useGame";
-import { GameStatus, GameInfo } from "@/lib/contractCalls";
+import { GameStatus, GameInfo, MIN_STAKE } from "@/lib/contractCalls";
 import { useGameStore } from "@/store/gameStore";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import HowToPlayModal from "@/component/HowToPlayModal";
+import { useAudioManager } from "@/hooks/useAudioManager";
+import { formatEther } from "viem";
 
 const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "600", "700"] });
 const anton = Anton({ subsets: ["latin"], weight: ["400"] });
@@ -29,6 +31,10 @@ export default function HomePage() {
   const [showHowToPlay, setShowHowToPlay] = useState(false);
   const [showConnectPrompt, setShowConnectPrompt] = useState(false);
   const [showFreeTrial, setShowFreeTrial] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const { startMusic, toggleMute } = useAudioManager();
+
+  useEffect(() => { startMusic(); }, [startMusic]);
 
   const {
     activeTab, setActiveTab, filters, setFilters,
@@ -151,6 +157,26 @@ export default function HomePage() {
             <button onClick={() => setShowHowToPlay(true)}
               className="text-gray-600 hover:text-gray-300 text-[10px] uppercase tracking-widest transition-colors hidden sm:block">
               How to Play
+            </button>
+
+            {/* Music toggle */}
+            <button
+              onClick={() => setMuted(toggleMute())}
+              title={muted ? "Unmute music" : "Mute music"}
+              className="text-gray-600 hover:text-gray-300 transition-colors hidden sm:flex items-center"
+            >
+              {muted ? (
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                </svg>
+              )}
             </button>
 
             <ConnectButton.Custom>
@@ -605,13 +631,88 @@ function ActiveGamesGrid({
 }
 
 // ─────────────────────────────────────────────────────────
+// COMPACT HISTORY ROW — used in My History past-games list
+// ─────────────────────────────────────────────────────────
+function CompactHistoryRow({
+  game,
+  onClick,
+  address,
+  live = false,
+}: {
+  game: GameInfo;
+  onClick: () => void;
+  address?: string;
+  live?: boolean;
+}) {
+  const isWinner = !!address && !!game.winner && game.winner.toLowerCase() === address.toLowerCase();
+  const isCancelled = game.status === GameStatus.Cancelled;
+  const stakeEth = parseFloat(formatEther(game.stake > 0n ? game.stake : MIN_STAKE)).toFixed(2);
+  const prizeEth = parseFloat(formatEther(game.prizePool > 0n ? game.prizePool : game.stake > 0n ? game.stake : MIN_STAKE)).toFixed(2);
+
+  const [badge, badgeCls] = live
+    ? ["LIVE",   "text-red-400   border-red-600/40   bg-red-950/20"]
+    : isCancelled
+    ? ["VOID",   "text-gray-600  border-gray-700/30  bg-gray-900/20"]
+    : isWinner
+    ? ["WIN",    "text-yellow-400 border-yellow-500/30 bg-yellow-950/20"]
+    : ["OUT",    "text-red-500   border-red-800/30   bg-red-950/15"];
+
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-3 px-3 py-2 border rounded-lg transition-all text-left group
+        ${live
+          ? "border-red-900/30 bg-red-950/10 hover:bg-red-950/20 hover:border-red-800/40"
+          : "border-white/[0.05] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]"
+        }`}
+    >
+      {/* Live pulse dot */}
+      {live && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />}
+
+      <span className="text-[10px] font-mono text-gray-700 w-6 shrink-0">
+        #{game.gameId.toString()}
+      </span>
+
+      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border shrink-0 tracking-wider ${badgeCls}`}>
+        {badge}
+      </span>
+
+      <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-hidden">
+        <span className="text-[11px] text-gray-400 font-mono">{stakeEth} G$</span>
+        {isWinner && (
+          <>
+            <span className="text-gray-700 text-[10px]">→</span>
+            <span className="text-[11px] text-amber-400 font-bold">{prizeEth} G$</span>
+          </>
+        )}
+      </div>
+
+      <span className="text-[10px] text-gray-700 shrink-0">{game.playerCount}/6</span>
+
+      {(game.totalRounds > 0 || game.currentRound > 0) && (
+        <span className="text-[10px] text-gray-700 shrink-0 hidden sm:inline">
+          Rd {game.totalRounds > 0 ? game.totalRounds : game.currentRound}
+        </span>
+      )}
+
+      <svg className="w-3 h-3 text-gray-800 group-hover:text-gray-500 shrink-0 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+      </svg>
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
 // MY GAMES — battle log
 // ─────────────────────────────────────────────────────────
+const HISTORY_PAGE_SIZE = 10;
+
 function MyGamesGrid({ address }: { address: string }) {
   const { data: fetchedMyGames, isLoading, error: myGamesError } = useMyGames();
   const setMyGames = useGameStore((state) => state.setMyGames);
   const queryClient = useQueryClient();
   const router = useRouter();
+  const [historyPage, setHistoryPage] = useState(0);
 
   useEffect(() => {
     if (fetchedMyGames) setMyGames(fetchedMyGames);
@@ -622,8 +723,8 @@ function MyGamesGrid({ address }: { address: string }) {
   if (isLoading) {
     return (
       <div className="space-y-1.5">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="h-14 bg-white/[0.03] animate-pulse" />
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-10 bg-white/[0.03] animate-pulse rounded-lg" />
         ))}
       </div>
     );
@@ -631,18 +732,27 @@ function MyGamesGrid({ address }: { address: string }) {
 
   if (!games.length) {
     return (
-      <div className="border border-white/[0.07] p-14 text-center max-w-md">
-        <p className={`${anton.className} text-4xl text-white/10 mb-3`}>NO HISTORY</p>
+      <div className="border border-white/[0.07] p-10 text-center max-w-md">
+        <p className={`${anton.className} text-3xl text-white/10 mb-2`}>NO HISTORY</p>
         <p className="text-gray-600 text-xs uppercase tracking-widest">You have not joined any games yet.</p>
       </div>
     );
   }
 
   const liveGames = games.filter((g) => g.status === GameStatus.Active || g.status === GameStatus.InProgress);
-  const pastGames = games.filter((g) => g.status === GameStatus.Ended || g.status === GameStatus.Cancelled);
+  // Most-recent-first
+  const pastGames = games
+    .filter((g) => g.status === GameStatus.Ended || g.status === GameStatus.Cancelled)
+    .sort((a, b) => Number(b.gameId - a.gameId));
+
+  const pageCount   = Math.ceil(pastGames.length / HISTORY_PAGE_SIZE);
+  const visiblePast = pastGames.slice(
+    historyPage * HISTORY_PAGE_SIZE,
+    (historyPage + 1) * HISTORY_PAGE_SIZE
+  );
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       {myGamesError && (
         <div className="flex items-center justify-between border-l-2 border-red-600 bg-red-950/10 px-4 py-2 text-red-400 text-xs">
           <span>{myGamesError.message}</span>
@@ -650,41 +760,91 @@ function MyGamesGrid({ address }: { address: string }) {
         </div>
       )}
 
-      {/* Live games — still show as cards */}
+      {/* Live games — compact rows, red-tinted */}
       {liveGames.length > 0 && (
         <section>
-          <div className="flex items-center gap-2 mb-4">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
             <p className="text-[9px] text-gray-500 uppercase tracking-[0.3em]">Active Tables</p>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="space-y-1.5">
             {liveGames.map((game) => (
-              <GameDataLoader key={game.gameId.toString()} game={game}
-                onClick={() => router.push(`/GameScreen/${game.gameId}`)} />
+              <CompactHistoryRow
+                key={game.gameId.toString()}
+                game={game}
+                onClick={() => router.push(`/GameScreen/${game.gameId}`)}
+                address={address}
+                live
+              />
             ))}
           </div>
         </section>
       )}
 
-      {/* Past games — cards */}
+      {/* Past games — paginated compact rows */}
       {pastGames.length > 0 && (
         <section>
-          <div className="flex items-center justify-between mb-4 pb-3 border-b border-white/[0.06]">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-2 pb-2 border-b border-white/[0.06]">
             <div className="flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-gray-600 inline-block" />
               <p className="text-[9px] text-gray-500 uppercase tracking-[0.3em]">Game History</p>
             </div>
             <p className="text-[9px] text-gray-700 uppercase tracking-widest">{pastGames.length} games</p>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {pastGames.map((game, i) => (
-              <motion.div key={game.gameId.toString()}
-                initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.04 }}>
-                <GameDataLoader game={game} onClick={() => router.push(`/GameScreen/${game.gameId}`)} />
-              </motion.div>
-            ))}
+
+          {/* Rows */}
+          <div className="space-y-1">
+            <AnimatePresence mode="wait">
+              {visiblePast.map((game) => (
+                <motion.div
+                  key={`${game.gameId}-${historyPage}`}
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.12 }}
+                >
+                  <CompactHistoryRow
+                    game={game}
+                    onClick={() => router.push(`/GameScreen/${game.gameId}`)}
+                    address={address}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
+
+          {/* Pagination */}
+          {pageCount > 1 && (
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/[0.05]">
+              <button
+                onClick={() => setHistoryPage((p) => Math.max(0, p - 1))}
+                disabled={historyPage === 0}
+                className="flex items-center gap-1 text-[10px] text-gray-600 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors uppercase tracking-widest"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+                Prev
+              </button>
+
+              <span className="text-[9px] text-gray-700 uppercase tracking-widest">
+                {historyPage + 1} / {pageCount}
+                <span className="ml-1 text-gray-800">({pastGames.length})</span>
+              </span>
+
+              <button
+                onClick={() => setHistoryPage((p) => Math.min(pageCount - 1, p + 1))}
+                disabled={historyPage >= pageCount - 1}
+                className="flex items-center gap-1 text-[10px] text-gray-600 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors uppercase tracking-widest"
+              >
+                Next
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+          )}
         </section>
       )}
     </div>

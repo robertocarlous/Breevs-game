@@ -373,8 +373,7 @@ export function approveGDArgs(_amount: bigint) {
     // Approve max once — avoids repeated relay calls for every game
     args: [CONTRACT_ADDRESS, maxUint256] as const,
     chain: celo,
-    // G$ token calls an internal relay during approve; needs extra gas
-    gas: 300000n,
+    gas: 200000n,
   };
 }
 
@@ -421,6 +420,7 @@ export function requestSpinArgs(gameId: bigint) {
     abi: BREEVS_ABI,
     functionName: "requestSpin" as const,
     args: [gameId] as const,
+    gas: 200000n,
   };
 }
 
@@ -430,6 +430,7 @@ export function resolveSpinArgs(gameId: bigint) {
     abi: BREEVS_ABI,
     functionName: "resolveSpin" as const,
     args: [gameId] as const,
+    gas: 400000n,
   };
 }
 
@@ -439,6 +440,7 @@ export function advanceRoundArgs(gameId: bigint) {
     abi: BREEVS_ABI,
     functionName: "advanceRound" as const,
     args: [gameId] as const,
+    gas: 150000n,
   };
 }
 

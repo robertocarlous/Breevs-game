@@ -80,9 +80,11 @@ export async function POST(req: NextRequest) {
   const rpc = process.env.CELO_RPC_URL || process.env.NEXT_PUBLIC_CELO_RPC_URL || "https://forno.celo.org";
   const wallet = createWalletClient({ account, chain: celo, transport: http(rpc) });
 
-  // Inline spin call — avoids generic type loss from helper function parameter
-  const spin = (gId: bigint) =>
-    wallet.writeContract({ address: CONTRACT_ADDRESS, abi: BREEVS_ABI, functionName: "spin", args: [gId], chain: celo });
+  const requestSpin = (gId: bigint) =>
+    wallet.writeContract({ address: CONTRACT_ADDRESS, abi: BREEVS_ABI, functionName: "requestSpin", args: [gId], chain: celo });
+
+  const resolveSpin = (gId: bigint) =>
+    wallet.writeContract({ address: CONTRACT_ADDRESS, abi: BREEVS_ABI, functionName: "resolveSpin", args: [gId], chain: celo });
 
   try {
     if (action === "advance") {
@@ -108,7 +110,7 @@ export async function POST(req: NextRequest) {
     let resolveTxHash: Hex | undefined;
 
     if (!pending.pending) {
-      commitTxHash = await spin(gameId);
+      commitTxHash = await requestSpin(gameId) as Hex;
       await publicClient.waitForTransactionReceipt({ hash: commitTxHash });
 
       const afterCommit = (await publicClient.readContract({
@@ -131,7 +133,7 @@ export async function POST(req: NextRequest) {
       await waitForBlock(publicClient, pending.commitBlock + REVEAL_DELAY);
     }
 
-    resolveTxHash = await spin(gameId);
+    resolveTxHash = await resolveSpin(gameId) as Hex;
     await publicClient.waitForTransactionReceipt({ hash: resolveTxHash });
 
     return NextResponse.json({ ok: true, commitTxHash, resolveTxHash });
