@@ -99,9 +99,14 @@ const CreateGameModal: React.FC<CreateGameModalProps> = ({ isOpen, onClose }) =>
       onClose();
       router.push(`/GameScreen/${gameId}`);
     } catch (err: any) {
-      const errorMessage = err.message?.includes("rejected")
-        ? "Transaction rejected by user"
-        : err.message || "Failed to create game. Please try again.";
+      const msg: string = err.message || "";
+      const errorMessage = msg.includes("rejected") || msg.includes("denied")
+        ? "Approval or transaction rejected. Please approve both the G$ spending permission and the create transaction in your wallet."
+        : msg.includes("FAILED_TIMEOUT") || msg.includes("relay error") || msg.includes("relay")
+        ? "G$ network relay timed out. Please wait a few seconds and try again."
+        : msg.includes("insufficient") || msg.includes("balance")
+        ? "Insufficient G$ balance."
+        : msg || "Failed to create game. Please try again.";
       showErrorToast(errorMessage, "Create Game Error");
     }
   };

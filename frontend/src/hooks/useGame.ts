@@ -8,6 +8,7 @@ import {
 import { useWriteContract, useAccount, useSwitchChain, useChainId } from "wagmi";
 import { celo } from "wagmi/chains";
 import { parseEventLogs } from "viem";
+import { approveViaPermit } from "@/hooks/useGoodDollar";
 import { useState, useEffect } from "react";
 import {
   publicClient,
@@ -296,7 +297,7 @@ function useContractWrite() {
       await switchChainAsync({ chainId: celo.id });
     }
     const hash = await _write(args);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
     if (receipt.status === "reverted") {
       try {
         await publicClient.simulateContract({ ...args, account: address });

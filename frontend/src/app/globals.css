@@ -77,6 +77,70 @@
 }
 .chamber-active { animation: chamber-pulse 2s ease-in-out infinite; }
 
+/* ─── Card corner gem pulse ───────────────────────────────────── */
+@keyframes gem-pulse {
+  0%, 100% { opacity: 0.5; filter: brightness(1); }
+  50%       { opacity: 0.8; filter: brightness(1.6); }
+}
+.card-corner-gem { animation: gem-pulse 2.8s ease-in-out infinite; }
+
+/* ─── Card metallic border gleam ──────────────────────────────── */
+@keyframes border-gleam {
+  0%   { background-position: 0%   50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0%   50%; }
+}
+.card-border-live {
+  background-size: 300% 300%;
+  animation: border-gleam 4s ease infinite;
+}
+
+/* ─── Revolver cylinder spin (on card hover) ──────────────────── */
+@keyframes cylinder-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.cylinder-spinning {
+  transform-origin: 60px 60px;
+  animation: cylinder-spin 10s linear infinite;
+}
+.cylinder-idle {
+  transform-origin: 60px 60px;
+  transition: transform 0.6s cubic-bezier(0.23,1,0.32,1);
+}
+
+/* ─── 3D card holographic sweep ───────────────────────────────── */
+@keyframes holo-sweep {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.card-holo {
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgba(255,255,255,0.04) 44%,
+    rgba(205,40,40,0.055) 50%,
+    rgba(255,255,255,0.04) 56%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation: holo-sweep 3.5s linear infinite;
+}
+
+/* ─── Prize pool number pulse ─────────────────────────────────── */
+@keyframes prize-pulse {
+  0%, 100% { text-shadow: none; }
+  50%       { text-shadow: 0 0 12px rgba(205,40,40,0.50), 0 0 28px rgba(205,40,40,0.18); }
+}
+.prize-glow { animation: prize-pulse 2.6s ease-in-out infinite; }
+
+/* ─── Win banner bounce ───────────────────────────────────────── */
+@keyframes winner-bounce {
+  0%, 100% { transform: scale(1) rotate(-1deg); }
+  50%       { transform: scale(1.04) rotate(1deg); }
+}
+.winner-banner { animation: winner-bounce 0.8s ease-in-out infinite; }
+
 /* ─── Scrollbar ───────────────────────────────────────────────── */
 ::-webkit-scrollbar       { width: 6px; }
 ::-webkit-scrollbar-track { background: #030B1F; }

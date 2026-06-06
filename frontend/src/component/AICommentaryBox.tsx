@@ -3,10 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-interface EliminationRecord {
-  name: string;
-  round: number;
-}
+interface EliminationRecord { name: string; round: number; }
 
 interface AICommentaryBoxProps {
   gameId: bigint;
@@ -18,7 +15,6 @@ interface AICommentaryBoxProps {
   eliminatedCount?: number;
   lastEliminatedAddress?: string | null;
   prizePool?: string;
-  // richer context for human-sounding commentary
   eventType?: string;
   lastEliminatedName?: string | null;
   winnerName?: string | null;
@@ -34,6 +30,17 @@ interface Commentary {
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
+const TENSION_CONFIG = [
+  { min: 9, label: "CRITICAL", color: "#ff3020", bar: "#ff4030", glow: "rgba(255,48,32,0.4)" },
+  { min: 7, label: "HIGH",     color: "#e05020", bar: "#e06030", glow: "rgba(220,80,40,0.3)" },
+  { min: 5, label: "MEDIUM",   color: "#c07830", bar: "#c08840", glow: "rgba(180,120,40,0.25)" },
+  { min: 0, label: "LOW",      color: "#808878", bar: "#909888", glow: "rgba(120,130,100,0.15)" },
+] as const;
+
+function getTension(level: number) {
+  return TENSION_CONFIG.find(t => level >= t.min) ?? TENSION_CONFIG[3];
+}
+
 export default function AICommentaryBox({
   gameId, eventTrigger, onClose,
   currentRound, activePlayers, totalPlayers, eliminatedCount, lastEliminatedAddress, prizePool,
@@ -43,12 +50,14 @@ export default function AICommentaryBox({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [displayedText, setDisplayedText] = useState("");
-  const isLoadingRef = useRef(false);
-  const isTypingRef = useRef(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isMinimised, setIsMinimised] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevTrigger = useRef(-1);
+
+  const isLoadingRef = useRef(false);
+  const isTypingRef  = useRef(false);
+  const timerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionRef   = useRef(0);
+  const prevTrigger  = useRef(-1);
 
   const fetchCommentary = async () => {
     if (isLoadingRef.current) return;
@@ -58,7 +67,7 @@ export default function AICommentaryBox({
     setDisplayedText("");
     setIsMinimised(false);
     try {
-      const response = await fetch(
+      const res = await fetch(
         `${BACKEND_URL}/api/games/${gameId.toString()}/generate_live_commentary/`,
         {
           method: "POST",
@@ -78,169 +87,240 @@ export default function AICommentaryBox({
           }),
         }
       );
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to fetch commentary");
-      }
-      const data = await response.json();
-      const c: Commentary = {
-        text: data.commentary_text,
-        tensionLevel: data.tension_level,
-        timestamp: data.created_at,
-      };
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
+      const d = await res.json();
+      const c: Commentary = { text: d.commentary_text, tensionLevel: d.tension_level, timestamp: d.created_at };
       setCommentary(c);
-      typewriterEffect(c.text);
+      typewriter(c.text);
     } catch (err: any) {
-      setError(err.message || "Could not fetch commentary");
+      setError(err.message || "No signal");
     } finally {
       isLoadingRef.current = false;
       setIsLoading(false);
     }
   };
 
-  // Each call gets a unique session ID. Old sessions detect they're stale and stop.
-  const sessionRef = useRef(0);
-
-  const typewriterEffect = (text: string) => {
-    // Cancel any running timer from the previous session
+  const typewriter = (text: string) => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    // Increment session — any in-flight callback that holds the old session value will bail out
     const session = ++sessionRef.current;
     isTypingRef.current = true;
     setIsTyping(true);
     setDisplayedText("");
     let i = 0;
-    const type = () => {
-      // If a newer session started, stop this one immediately
+    const tick = () => {
       if (sessionRef.current !== session) return;
       if (i < text.length) {
-        setDisplayedText((prev) => prev + text.charAt(i));
-        i++;
-        timerRef.current = setTimeout(type, 18);
+        setDisplayedText(p => p + text.charAt(i++));
+        timerRef.current = setTimeout(tick, 16);
       } else {
         isTypingRef.current = false;
         setIsTyping(false);
       }
     };
-    type();
+    tick();
   };
 
-  // Fetch when a game event fires
   useEffect(() => {
-    if (gameId <= 0n) return;
-    if (eventTrigger === prevTrigger.current) return;
+    if (gameId <= 0n || eventTrigger === prevTrigger.current) return;
     prevTrigger.current = eventTrigger;
     fetchCommentary();
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [eventTrigger, gameId]);
 
-  // Auto-refresh every 30 seconds so commentary stays live without user action
   useEffect(() => {
     if (gameId <= 0n) return;
-    const interval = setInterval(() => {
-      if (!isLoadingRef.current && !isTypingRef.current) {
-        fetchCommentary();
-      }
+    const id = setInterval(() => {
+      if (!isLoadingRef.current && !isTypingRef.current) fetchCommentary();
     }, 30000);
-    return () => clearInterval(interval);
+    return () => clearInterval(id);
   }, [gameId, activePlayers, currentRound, eliminatedCount]);
 
-  const tensionColor = (l: number) => l >= 8 ? "text-red-400" : l >= 5 ? "text-orange-400" : "text-yellow-400";
-  const tensionLabel = (l: number) => l >= 9 ? "CRITICAL" : l >= 7 ? "HIGH" : l >= 5 ? "MEDIUM" : "LOW";
+  const tension = commentary ? getTension(commentary.tensionLevel) : null;
+  const tensionPct = commentary ? Math.round((commentary.tensionLevel / 10) * 100) : 0;
 
   return (
     <AnimatePresence>
       <motion.div
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 40 }}
-        transition={{ type: "spring", damping: 22, stiffness: 200 }}
-        className="fixed bottom-24 right-4 z-50 w-80 sm:w-96"
+        initial={{ opacity: 0, x: 40, y: 20 }}
+        animate={{ opacity: 1, x: 0, y: 0 }}
+        exit={{ opacity: 0, x: 40 }}
+        transition={{ type: "spring", damping: 26, stiffness: 220 }}
+        className="fixed bottom-6 right-4 z-50 w-[340px] sm:w-[380px]"
       >
-        {/* Glow ring */}
-        <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-red-500/20 to-violet-500/20 blur-xl pointer-events-none" />
+        {/* Outer broadcast frame */}
+        <div
+          className="relative rounded-xl overflow-hidden"
+          style={{
+            background: "linear-gradient(170deg, rgba(8,6,4,0.98) 0%, rgba(12,9,6,0.99) 100%)",
+            border: "1px solid rgba(100,70,30,0.35)",
+            boxShadow: "0 24px 70px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.03), inset 0 1px 0 rgba(255,255,255,0.04)",
+          }}
+        >
+          {/* ── Header — broadcast chyron style ── */}
+          <div
+            className="flex items-center justify-between px-3 py-2 relative"
+            style={{
+              background: "linear-gradient(to right, rgba(18,10,6,0.98), rgba(22,13,7,0.98))",
+              borderBottom: "1px solid rgba(100,65,25,0.25)",
+            }}
+          >
+            {/* Left: LIVE badge + title */}
+            <div className="flex items-center gap-2.5">
+              {/* LIVE dot */}
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: "#dc3020" }} />
+                  <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: "#ff3828" }} />
+                </span>
+                <span
+                  className="text-[9px] font-black tracking-[0.2em] px-1.5 py-0.5 rounded"
+                  style={{ background: "#dc2010", color: "white", letterSpacing: "0.15em" }}
+                >
+                  LIVE
+                </span>
+              </div>
 
-        <div className="relative bg-[#0a0d1f]/95 backdrop-blur-xl border border-red-500/30 rounded-2xl overflow-hidden shadow-2xl shadow-red-900/20">
-
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-red-900/60 to-violet-900/60 border-b border-red-500/20">
-            <div className="flex items-center gap-2">
-              {/* Live pulse dot */}
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
-              </span>
               <div>
-                <p className="text-xs font-bold text-white tracking-wide">🎰 Russian Roulette AI</p>
-                <p className="text-[10px] text-red-400">Live Game Commentary</p>
+                <p className="text-[11px] font-black text-stone-200 tracking-wide leading-none">BREEVS ROULETTE</p>
+                <p className="text-[9px] text-stone-600 leading-none mt-0.5">
+                  {currentRound ? `Round ${currentRound}` : "Pre-game"} · {activePlayers ?? "?"} alive
+                </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {commentary && !isLoading && (
-                <div className="flex items-center gap-1 bg-black/30 rounded-full px-2 py-0.5">
-                  <span className="text-[10px] text-gray-400">Tension:</span>
-                  <span className={`text-[10px] font-bold ${tensionColor(commentary.tensionLevel)}`}>
-                    {tensionLabel(commentary.tensionLevel)}
-                  </span>
-                </div>
-              )}
-              {/* Minimise */}
+            {/* Right: controls */}
+            <div className="flex items-center gap-1">
               <button
-                onClick={() => setIsMinimised((v) => !v)}
-                className="text-gray-400 hover:text-white transition-colors w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 text-xs"
+                onClick={() => setIsMinimised(v => !v)}
+                className="w-6 h-6 rounded flex items-center justify-center text-stone-600 hover:text-stone-400 transition-colors text-[10px]"
+                style={{ background: "rgba(255,255,255,0.04)" }}
               >
                 {isMinimised ? "▲" : "▼"}
               </button>
-              {/* Close */}
               <button
                 onClick={onClose}
-                className="text-gray-400 hover:text-white transition-colors w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10"
+                className="w-6 h-6 rounded flex items-center justify-center text-stone-600 hover:text-stone-300 transition-colors text-xs"
+                style={{ background: "rgba(255,255,255,0.04)" }}
               >
                 ✕
               </button>
             </div>
           </div>
 
-          {/* Body — hidden when minimised */}
-          {!isMinimised && (
-            <div className="p-4 min-h-[90px]">
-              {isLoading && (
-                <div className="flex items-center gap-3">
-                  <div className="w-5 h-5 border-2 border-red-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                  <p className="text-xs text-gray-400 animate-pulse">Watching the game...</p>
-                </div>
-              )}
-              {error && !isLoading && (
-                <div className="text-xs text-red-400 text-center">
-                  <p>⚠️ {error}</p>
-                  <button onClick={fetchCommentary} className="mt-1 text-violet-300 hover:underline text-[10px]">Retry</button>
-                </div>
-              )}
-              {!isLoading && !error && (
-                <p className="text-sm text-gray-100 leading-relaxed font-light">
-                  {displayedText}
-                  {isTyping && <span className="inline-block w-0.5 h-4 bg-red-400 ml-0.5 animate-pulse" />}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Footer */}
-          {!isMinimised && (
-            <div className="flex items-center justify-between px-4 py-2 border-t border-red-500/10 bg-black/20">
-              <p className="text-[10px] text-gray-500">Powered by Claude Haiku 4.5</p>
-              <button
-                onClick={fetchCommentary}
-                disabled={isLoading}
-                className="text-[10px] text-red-300 hover:text-red-100 font-semibold transition-all disabled:opacity-50 flex items-center gap-1"
+          {/* ── Body ── */}
+          <AnimatePresence>
+            {!isMinimised && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
               >
-                {isLoading ? <><span className="w-2.5 h-2.5 border border-red-400 border-t-transparent rounded-full animate-spin inline-block" /> Loading</> : "↻ Refresh"}
-              </button>
-            </div>
-          )}
+                {/* Commentary text area */}
+                <div className="px-4 py-3 min-h-[80px]">
+                  {isLoading && (
+                    <div className="flex items-center gap-2.5 py-2">
+                      {/* Broadcast "loading" bars */}
+                      <div className="flex gap-0.5 items-end h-5 shrink-0">
+                        {[0.6, 1, 0.7, 0.9, 0.5].map((h, i) => (
+                          <div
+                            key={i}
+                            className="w-1 rounded-sm animate-pulse"
+                            style={{
+                              height: `${h * 20}px`,
+                              background: "#a05828",
+                              animationDelay: `${i * 0.1}s`,
+                              opacity: 0.7,
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-xs text-stone-600 italic">Commentator is watching…</p>
+                    </div>
+                  )}
+
+                  {error && !isLoading && (
+                    <div className="flex items-center gap-2 py-1">
+                      <span className="text-stone-600 text-xs">📡 No signal —</span>
+                      <button
+                        onClick={fetchCommentary}
+                        className="text-xs font-bold transition-colors"
+                        style={{ color: "#a06030" }}
+                      >
+                        Reconnect
+                      </button>
+                    </div>
+                  )}
+
+                  {!isLoading && !error && (
+                    <p className="text-sm text-stone-300 leading-relaxed font-light">
+                      {displayedText}
+                      {isTyping && (
+                        <span
+                          className="inline-block w-0.5 h-[14px] ml-0.5 align-middle animate-pulse"
+                          style={{ background: "#a06030" }}
+                        />
+                      )}
+                    </p>
+                  )}
+                </div>
+
+                {/* ── Tension meter ── */}
+                {commentary && !isLoading && (
+                  <div className="px-4 pb-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-[9px] uppercase tracking-[0.15em] text-stone-700 font-bold">Tension</p>
+                      <p
+                        className="text-[9px] font-black tracking-[0.12em]"
+                        style={{ color: tension!.color }}
+                      >
+                        {tension!.label}
+                      </p>
+                    </div>
+                    <div
+                      className="h-1.5 rounded-full overflow-hidden"
+                      style={{ background: "rgba(255,255,255,0.05)" }}
+                    >
+                      <motion.div
+                        className="h-full rounded-full"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${tensionPct}%` }}
+                        transition={{ duration: 0.8, ease: "easeOut" }}
+                        style={{
+                          background: `linear-gradient(to right, ${tension!.bar}88, ${tension!.bar})`,
+                          boxShadow: `0 0 8px ${tension!.glow}`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Footer strip ── */}
+                <div
+                  className="flex items-center justify-between px-4 py-2"
+                  style={{
+                    borderTop: "1px solid rgba(80,55,25,0.2)",
+                    background: "rgba(6,4,3,0.6)",
+                  }}
+                >
+                  <p className="text-[9px] text-stone-700">Claude Haiku 4.5</p>
+                  <button
+                    onClick={fetchCommentary}
+                    disabled={isLoading}
+                    className="text-[9px] font-bold transition-all disabled:opacity-40 flex items-center gap-1"
+                    style={{ color: "#806030" }}
+                  >
+                    {isLoading ? (
+                      <>
+                        <span className="w-2 h-2 border border-stone-600 border-t-transparent rounded-full animate-spin inline-block" />
+                        Live…
+                      </>
+                    ) : "↻ Refresh"}
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </motion.div>
     </AnimatePresence>

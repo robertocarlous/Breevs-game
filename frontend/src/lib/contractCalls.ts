@@ -374,15 +374,6 @@ export async function getGDClaimEntitlement(address: string): Promise<bigint> {
 
 // ─── WRITE FUNCTION ARG BUILDERS ─────────────────────────────────────────────
 
-export async function getGDAllowance(owner: `0x${string}`): Promise<bigint> {
-  return publicClient.readContract({
-    address: GD_TOKEN_ADDRESS,
-    abi: ERC20_ABI,
-    functionName: "allowance",
-    args: [owner, CONTRACT_ADDRESS],
-  }) as Promise<bigint>;
-}
-
 function gdApproveCalldata(): `0x${string}` {
   return encodeFunctionData({
     abi: ERC20_ABI,
@@ -442,8 +433,10 @@ export function approveGDArgs(amount: bigint = maxUint256) {
     address: GD_TOKEN_ADDRESS,
     abi: ERC20_ABI,
     functionName: "approve" as const,
-    args: [CONTRACT_ADDRESS, amount] as const,
+    // Approve max once — avoids repeated relay calls for every game
+    args: [CONTRACT_ADDRESS, maxUint256] as const,
     chain: celo,
+    gas: 200000n,
   };
 }
 
@@ -490,6 +483,7 @@ export function spinRoundArgs(gameId: bigint) {
     abi: BREEVS_ABI,
     functionName: "spinRound" as const,
     args: [gameId] as const,
+    gas: 400000n,
   };
 }
 
@@ -499,6 +493,7 @@ export function advanceRoundArgs(gameId: bigint) {
     abi: BREEVS_ABI,
     functionName: "advanceRound" as const,
     args: [gameId] as const,
+    gas: 150000n,
   };
 }
 
