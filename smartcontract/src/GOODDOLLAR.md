@@ -36,7 +36,7 @@ NEXT_PUBLIC_CONTRACT_ADDRESS=0x641ff69fe26c504a8a06E611D2a961A39f2a796b
 NEXT_PUBLIC_GOODDOLLAR_ENV=production
 ```
 
-**Celo mainnet (June 2026):** UUPS proxy `0x641ff69...`, implementation `0xBc671873...` ([Sourcify](https://repo.sourcify.dev/42220/0xBc671873757b93229cd575436C7219944a872eE5)). Gasless spins via relayer `0x2987D32F...`.
+**Celo mainnet (June 2026):** UUPS proxy `0x641ff69...`, implementation `0x66EE641E...` ([Sourcify](https://repo.sourcify.dev/42220/0x66EE641EAD1432822b319a4e186692DACb87936b)). Host spins via single-tx `spinRound()`.
 
 ## GoodBuilders fit
 

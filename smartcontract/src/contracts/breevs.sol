@@ -17,25 +17,21 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  * Deploy via ERC-1967 UUPS proxy. Users interact with the proxy address;
  * upgrades replace the implementation while preserving game state.
  *
- * HOW RANDOMNESS WORKS
- * ────────────────────
- * Step 1 – spin() / requestSpin():  Commit at current block (host or spinOperator).
- * Step 2 – spin() / resolveSpin():  After REVEAL_DELAY blocks, spinOperator resolves
- *          using on-chain entropy (prevrandao). Users only sign create/join/claim.
- *                          The seed mixes block.prevrandao, timestamps and
- *                          game-specific entropy so the host cannot bias
- *                          the outcome.
+ * HOW RANDOMNESS WORKS (spinRound)
+ * ────────────────────────────────
+ * Host calls spinRound() once per elimination. The seed mixes block.prevrandao,
+ * timestamps, and game-specific entropy. One tx, one host signature.
+ *
+ * Legacy two-step spin()/requestSpin()/resolveSpin() remains for older games only.
  *
  * FLOW
  * ────
  * 1. createGame()   – host stakes and sets round duration
  * 2. joinGame()     – 5 more players join (6 total required)
  * 3. startGame()    – auto-called when 6 players join (host may also call)
- * 4. spin()         – relayer commits OR resolves (two calls, REVEAL_DELAY apart)
- * 5. resolveSpin()  – spinOperator resolves after REVEAL_DELAY; one NON-HOST player
- *                     is eliminated; round auto-advances
- * 6. advanceRound() – (optional) manually advance if spin not called in time
- * 7. claimPrize()   – last non-host player standing claims the full prize pool
+ * 4. spinRound()    – host spins once; one NON-HOST player eliminated
+ * 5. advanceRound() – advance if round timer expired without a spin
+ * 6. claimPrize()   – last non-host player standing claims the full prize pool
  */
 contract BreevsRussianRoulette is
     Initializable,
@@ -259,20 +255,29 @@ contract BreevsRussianRoulette is
         _startGameInternal(gameId);
     }
 
-    /**
-     * @notice Sets the backend relayer allowed to commit/resolve spins (pays gas).
-     */
+    /** @notice Legacy — unused by spinRound flow. Kept for storage compatibility. */
     function setSpinOperator(address operator) external onlyOwner {
         require(operator != address(0), "Invalid operator");
         spinOperator = operator;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    //  SPIN — two-step commit/reveal elimination
+    //  SPIN
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Relayer entrypoint: commit if none pending, else resolve after REVEAL_DELAY.
+     * @notice Single-tx spin: host eliminates one eligible player and advances the round.
+     */
+    function spinRound(uint256 gameId) external {
+        Game storage g = games[gameId];
+        require(msg.sender == g.creator, "Only host can spin");
+        _clearExpiredPendingSpin(gameId);
+        require(!pendingSpins[gameId].pending, "Resolve legacy pending spin first");
+        _executeSpinRound(gameId);
+    }
+
+    /**
+     * @notice Legacy relayer entrypoint: commit if none pending, else resolve after REVEAL_DELAY.
      */
     function spin(uint256 gameId) external {
         _requireSpinAuthority(gameId);
@@ -416,6 +421,50 @@ contract BreevsRussianRoulette is
         );
     }
 
+    function _clearExpiredPendingSpin(uint256 gameId) internal {
+        SpinRequest storage existing = pendingSpins[gameId];
+        if (existing.pending && block.number > existing.commitBlock + 500) {
+            delete pendingSpins[gameId];
+        }
+    }
+
+    function _executeSpinRound(uint256 gameId) internal {
+        Game storage g = games[gameId];
+        require(g.status == Status.IN_PROGRESS, "Game not in progress");
+        require(
+            block.number <= g.roundEnd,
+            "Round has expired - call advanceRound"
+        );
+
+        address[] memory allActive = _getActivePlayers(gameId);
+        address[] memory eligible = _getEligiblePlayers(gameId, g.creator);
+        require(eligible.length > 0, "No eligible players to eliminate");
+
+        bytes32 seed = keccak256(
+            abi.encodePacked(
+                block.prevrandao,
+                block.number,
+                block.timestamp,
+                gameId,
+                g.currentRound,
+                _hashPlayers(allActive)
+            )
+        );
+
+        uint256 victimIdx = uint256(seed) % eligible.length;
+        address victim = eligible[victimIdx];
+
+        emit SpinRequested(gameId, block.number, g.currentRound);
+        _eliminatePlayer(gameId, victim, g.creator);
+        emit PlayerEliminated(gameId, victim, g.currentRound);
+
+        if (g.status == Status.IN_PROGRESS) {
+            g.currentRound++;
+            g.roundEnd = block.number + g.roundDuration;
+            emit RoundAdvanced(gameId, g.currentRound);
+        }
+    }
+
     function _commitSpin(uint256 gameId) internal {
         Game storage g = games[gameId];
         require(g.status == Status.IN_PROGRESS, "Game not in progress");
@@ -424,11 +473,7 @@ contract BreevsRussianRoulette is
             "Round has expired - call advanceRound"
         );
 
-        SpinRequest storage existing = pendingSpins[gameId];
-        if (existing.pending && block.number > existing.commitBlock + 500) {
-            delete pendingSpins[gameId];
-        }
-
+        _clearExpiredPendingSpin(gameId);
         require(!pendingSpins[gameId].pending, "Spin already pending");
 
         address[] memory eligible = _getEligiblePlayers(gameId, g.creator);

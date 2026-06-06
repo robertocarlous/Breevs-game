@@ -24,18 +24,18 @@ import {
   isPrizeClaimed,
   isUserInGame,
   isGameCreator,
-  getPendingSpin,
   getGDBalance,
   getGDAllowance,
   getGDIdentityStatus,
   getGDClaimEntitlement,
   approveGDArgs,
   createGameArgs,
+  createGameWithApprovalArgs,
   cancelGameArgs,
   joinGameArgs,
+  joinGameWithApprovalArgs,
   startGameArgs,
-  requestSpinArgs,
-  resolveSpinArgs,
+  spinRoundArgs,
   advanceRoundArgs,
   claimPrizeArgs,
   claimGDArgs,
@@ -45,13 +45,12 @@ import {
   GameInfo,
   PlayerData,
   UserStats,
-  SpinRequest,
 } from "@/lib/contractCalls";
 import { useGameStore } from "@/store/gameStore";
 
 // ─── Re-export types ──────────────────────────────────────────────────────────
 export { GameStatus };
-export type { GameInfo, PlayerData, UserStats, SpinRequest };
+export type { GameInfo, PlayerData, UserStats };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // READ HOOKS
@@ -114,16 +113,6 @@ export function useIsUserInGame(gameId: bigint, user: string) {
     queryKey: ["isUserInGame", gameId.toString(), user],
     queryFn: () => isUserInGame(gameId, user),
     enabled: !!gameId && !!user,
-  });
-}
-
-export function usePendingSpin(gameId: bigint) {
-  return useQuery<SpinRequest, Error>({
-    queryKey: ["pendingSpin", gameId.toString()],
-    queryFn: () => getPendingSpin(gameId),
-    enabled: !!gameId && gameId > 0n,
-    refetchInterval: 2000,
-    staleTime: 0,
   });
 }
 
@@ -323,36 +312,19 @@ function useContractWrite() {
   return { writeContractAsync, invalidate, address };
 }
 
-/** Ensures G$ allowance. Tries permit (off-chain signature) first; if the
- *  user denies or the wallet doesn't support it, falls back to a regular
- *  approve() transaction which is always supported. */
-async function ensureGDApproval(
+/** One wallet popup: game action only, or Multicall3 batch [approve G$, action]. */
+async function writeGameAction(
   writeContractAsync: ReturnType<typeof useContractWrite>["writeContractAsync"],
-  owner: string,
-  amount: bigint
+  owner: `0x${string}`,
+  stakeAmount: bigint,
+  directArgs: ReturnType<typeof createGameArgs> | ReturnType<typeof joinGameArgs>,
+  batchedArgs: ReturnType<typeof createGameWithApprovalArgs> | ReturnType<typeof joinGameWithApprovalArgs>
 ) {
-  const allowance = await publicClient.readContract({
-    address: GD_TOKEN_ADDRESS,
-    abi: ERC20_ABI,
-    functionName: "allowance",
-    args: [owner as `0x${string}`, CONTRACT_ADDRESS],
-  }) as bigint;
-
-  if (allowance >= amount) return;
-
-  try {
-    await approveViaPermit(owner as `0x${string}`);
-  } catch (permitErr: unknown) {
-    const msg = permitErr instanceof Error ? permitErr.message : "";
-    // If the user explicitly rejected the signature, re-throw immediately
-    // so the caller's error handler can show "rejected by user".
-    if (msg.includes("denied") || msg.includes("rejected") || msg.includes("4001")) {
-      throw permitErr;
-    }
-    // For any other permit failure (wallet doesn't support typed-data, relay
-    // error, etc.) fall back to a standard approve() transaction.
-    await writeContractAsync(approveGDArgs(amount));
+  const allowance = await getGDAllowance(owner);
+  if (allowance >= stakeAmount) {
+    return writeContractAsync(directArgs);
   }
+  return writeContractAsync(batchedArgs);
 }
 
 export function useCreateGame() {
@@ -365,8 +337,13 @@ export function useCreateGame() {
     setIsPending(true);
     setError(null);
     try {
-      await ensureGDApproval(writeContractAsync, address!, stake);
-      const hash = await writeContractAsync(createGameArgs(duration, stake));
+      const hash = await writeGameAction(
+        writeContractAsync,
+        address! as `0x${string}`,
+        stake,
+        createGameArgs(duration, stake),
+        createGameWithApprovalArgs(duration, stake)
+      );
       const receipt = await publicClient.getTransactionReceipt({ hash });
       const logs = parseEventLogs({ abi: BREEVS_ABI, logs: receipt.logs, eventName: "GameCreated" });
       const gameId = logs[0]?.args.gameId ?? await getTotalGames();
@@ -399,8 +376,13 @@ export function useJoinGame() {
     try {
       // Fetch the game's stake if not provided
       const stakeAmount = stake ?? (await getGameInfo(gameId)).stake;
-      await ensureGDApproval(writeContractAsync, address!, stakeAmount);
-      const hash = await writeContractAsync(joinGameArgs(gameId));
+      const hash = await writeGameAction(
+        writeContractAsync,
+        address! as `0x${string}`,
+        stakeAmount,
+        joinGameArgs(gameId),
+        joinGameWithApprovalArgs(gameId)
+      );
       invalidate();
       qc.invalidateQueries({ queryKey: ["gdBalance", address] });
       qc.invalidateQueries({ queryKey: ["gdAllowance", address] });
@@ -443,7 +425,7 @@ export function useStartGame() {
   return { mutateAsync, isPending, error };
 }
 
-export function useRequestSpin() {
+export function useSpinRound() {
   const { writeContractAsync, invalidate } = useContractWrite();
   const qc = useQueryClient();
   const [isPending, setIsPending] = useState(false);
@@ -453,36 +435,9 @@ export function useRequestSpin() {
     setIsPending(true);
     setError(null);
     try {
-      const hash = await writeContractAsync(requestSpinArgs(gameId));
+      const hash = await writeContractAsync(spinRoundArgs(gameId));
       invalidate();
-      qc.invalidateQueries({ queryKey: ["pendingSpin", gameId.toString()] });
-      return { txId: hash };
-    } catch (err: unknown) {
-      const mapped = mapContractError(err);
-      const e = new Error(mapped.message);
-      setError(e);
-      throw e;
-    } finally {
-      setIsPending(false);
-    }
-  };
-
-  return { mutateAsync, isPending, error };
-}
-
-export function useResolveSpin() {
-  const { writeContractAsync, invalidate } = useContractWrite();
-  const qc = useQueryClient();
-  const [isPending, setIsPending] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
-  const mutateAsync = async ({ gameId }: { gameId: bigint }) => {
-    setIsPending(true);
-    setError(null);
-    try {
-      const hash = await writeContractAsync(resolveSpinArgs(gameId));
-      invalidate();
-      qc.invalidateQueries({ queryKey: ["pendingSpin", gameId.toString()] });
+      qc.invalidateQueries({ queryKey: ["gameInfo", gameId.toString()] });
       return { txId: hash };
     } catch (err: unknown) {
       const mapped = mapContractError(err);
@@ -603,5 +558,4 @@ export function useClaimGD() {
   return { mutateAsync, isPending, error };
 }
 
-// Legacy alias
-export const useSpin = useRequestSpin;
+export const useSpin = useSpinRound;

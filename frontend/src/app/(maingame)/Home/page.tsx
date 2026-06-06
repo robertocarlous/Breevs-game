@@ -19,6 +19,7 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import HowToPlayModal from "@/component/HowToPlayModal";
 import { useAudioManager } from "@/hooks/useAudioManager";
 import { formatEther } from "viem";
+import PointsSummary from "@/component/PointsSummary";
 
 const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "600", "700"] });
 const anton = Anton({ subsets: ["latin"], weight: ["400"] });
@@ -324,6 +325,7 @@ export default function HomePage() {
               {isConnected && address && (
                 <div className="xl:hidden mt-10 space-y-4">
                   <LiveBoard activeCount={liveCount} />
+                  <SidebarPoints address={address} />
                   <DailyContracts address={address} />
                   <Achievements address={address} />
                 </div>
@@ -339,6 +341,7 @@ export default function HomePage() {
             {isConnected && address ? (
               <aside className="hidden xl:flex flex-col gap-4 w-64 shrink-0 sticky top-[68px] self-start max-h-[calc(100vh-5rem)] overflow-y-auto scrollbar-none pb-4">
                 <LiveBoard activeCount={liveCount} />
+                <SidebarPoints address={address} />
                 <DailyContracts address={address} />
                 <Achievements address={address} />
               </aside>
@@ -386,6 +389,19 @@ function LiveBoard({ activeCount }: { activeCount: number }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// REWARD POINTS — derived from on-chain stats
+// ─────────────────────────────────────────────────────────
+function SidebarPoints({ address }: { address: string }) {
+  const { data: stats } = useUserStats(address);
+  return (
+    <PointsSummary
+      gamesPlayed={stats?.gamesPlayed ?? 0}
+      gamesWon={stats?.gamesWon ?? 0}
+    />
   );
 }
 

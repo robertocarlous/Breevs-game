@@ -92,12 +92,10 @@ describe("BreevsRussianRoulette", function () {
     });
   });
 
-  describe("spin operator", function () {
-    it("allows spinOperator to commit and resolve without host wallet", async function () {
+  describe("spinRound()", function () {
+    it("eliminates one non-host player in a single host transaction", async function () {
       const { contract, signers, gMock, gameAddr } = await deployFresh();
-      const [host, p2, p3, p4, p5, p6, relayer] = signers;
-
-      await contract.setSpinOperator(await relayer.getAddress());
+      const [host, p2, p3, p4, p5, p6] = signers;
 
       await approveAndCreate(gMock, contract, host, gameAddr);
       const gameId = 1n;
@@ -105,13 +103,13 @@ describe("BreevsRussianRoulette", function () {
         await approveAndJoin(gMock, contract, p, gameAddr, gameId);
       }
 
-      const c = contract.connect(relayer);
-      await c.spin(gameId);
-      await ethers.provider.send("evm_mine", []);
-      await c.spin(gameId);
+      await expect(contract.connect(host).spinRound(gameId)).to.emit(
+        contract,
+        "PlayerEliminated"
+      );
 
       const eligible = await contract.getEligiblePlayers(gameId);
-      expect(eligible.length).to.be.lessThan(5);
+      expect(eligible.length).to.equal(4);
     });
   });
 
