@@ -14,6 +14,7 @@ import { GameStatus } from "@/lib/contractCalls";
 import { useRouter } from "next/navigation";
 import Mascot from "@/assets/RR_LOGO_1.png";
 import GoodDollarPanel from "@/component/GoodDollarPanel";
+import PointsSummary from "@/component/PointsSummary";
 
 const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "700"] });
 
@@ -168,6 +169,17 @@ export default function WalletPage() {
                     </div>
                   )}
                 </div>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.06 }}
+              >
+                <PointsSummary
+                  gamesPlayed={stats?.gamesPlayed ?? 0}
+                  gamesWon={stats?.gamesWon ?? 0}
+                />
               </motion.div>
 
               {/* ── Stats strip ── */}

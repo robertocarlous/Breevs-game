@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { getUserStats, getAllGameIds, getGameInfo } from "@/lib/contractCalls";
 import { Open_Sans } from "next/font/google";
 import { formatEther } from "viem";
-import { RefreshCw, Trophy, Swords, Coins, Percent, Clock } from "lucide-react";
+import { RefreshCw, Trophy, Swords, Coins, Percent, Clock, Star } from "lucide-react";
+import { computePoints } from "@/lib/points";
 import BackgroundImgBlur from "@/component/BackgroundBlur";
 import Mascot from "@/assets/RR_LOGO_1.png";
 import RRLogo from "@/assets/RR_LOGO_2_1.png";
@@ -20,14 +21,15 @@ interface PlayerStats {
   totalWinnings: bigint;
   totalStaked: bigint;
   winRate: number;
+  points: number;
 }
 
 // ── Cache helpers (localStorage, 5-min TTL) ───────────────────────────────────
-const CACHE_KEY = "breevs_leaderboard_v2";
+const CACHE_KEY = "breevs_leaderboard_v3";
 const CACHE_TTL = 5 * 60 * 1000;
 
 interface CacheEntry {
-  players: { address: string; gamesPlayed: number; gamesWon: number; totalWinnings: string; totalStaked: string; winRate: number }[];
+  players: { address: string; gamesPlayed: number; gamesWon: number; totalWinnings: string; totalStaked: string; winRate: number; points: number }[];
   timestamp: number;
 }
 
@@ -45,6 +47,7 @@ function readCache(): { players: PlayerStats[]; ageMs: number } | null {
         ...p,
         totalWinnings: BigInt(p.totalWinnings),
         totalStaked:   BigInt(p.totalStaked),
+        points: p.points ?? computePoints(p.gamesPlayed, p.gamesWon),
       })),
     };
   } catch { return null; }
@@ -64,11 +67,12 @@ function writeCache(players: PlayerStats[]) {
   } catch { /* quota exceeded — ignore */ }
 }
 
-type SortKey = "winrate" | "winnings" | "games";
+type SortKey = "points" | "winrate" | "winnings" | "games";
 
 const SORT_OPTS: { key: SortKey; label: string; icon: React.ReactNode }[] = [
+  { key: "points",   label: "Points",         icon: <Star     className="w-3.5 h-3.5" /> },
   { key: "winrate",  label: "Survival Rate", icon: <Percent  className="w-3.5 h-3.5" /> },
-  { key: "winnings", label: "CELO Earned",   icon: <Coins    className="w-3.5 h-3.5" /> },
+  { key: "winnings", label: "G$ Earned",     icon: <Coins    className="w-3.5 h-3.5" /> },
   { key: "games",    label: "Matches",        icon: <Swords   className="w-3.5 h-3.5" /> },
 ];
 
@@ -86,7 +90,7 @@ export default function LeaderboardPage() {
   const [players,    setPlayers]    = useState<PlayerStats[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState<string | null>(null);
-  const [sort,       setSort]       = useState<SortKey>("winrate");
+  const [sort,       setSort]       = useState<SortKey>("points");
   const [refreshing, setRefreshing] = useState(false);
   const [cacheAgeMs, setCacheAgeMs] = useState<number | null>(null);
 
@@ -122,6 +126,7 @@ export default function LeaderboardPage() {
               totalWinnings: s.totalWinnings,
               totalStaked:   s.totalStaked,
               winRate: s.gamesPlayed > 0 ? (s.gamesWon / s.gamesPlayed) * 100 : 0,
+              points: computePoints(s.gamesPlayed, s.gamesWon),
             });
           }
         } catch { /* skip bad game */ }
@@ -139,7 +144,8 @@ export default function LeaderboardPage() {
   };
 
   const sorted = [...players].sort((a, b) => {
-    if (sort === "winrate")  return b.winRate - a.winRate || Number(b.totalWinnings - a.totalWinnings);
+    if (sort === "points")   return b.points - a.points || b.gamesWon - a.gamesWon;
+    if (sort === "winrate")  return b.winRate - a.winRate || b.points - a.points;
     if (sort === "winnings") return Number(b.totalWinnings - a.totalWinnings);
     return b.gamesPlayed - a.gamesPlayed;
   });
@@ -238,7 +244,7 @@ export default function LeaderboardPage() {
               <span className="hidden sm:block text-[10px] text-gray-700 uppercase tracking-widest text-right">Survival</span>
               <span className="hidden sm:block text-[10px] text-gray-700 uppercase tracking-widest text-right">W / G</span>
               <span className="text-[10px] text-gray-700 uppercase tracking-widest text-right">
-                {sort === "winnings" ? "CELO" : sort === "games" ? "Matches" : "Rate"}
+                {sort === "points" ? "Pts" : sort === "winnings" ? "G$" : sort === "games" ? "Matches" : "Rate"}
               </span>
             </div>
 
@@ -250,8 +256,9 @@ export default function LeaderboardPage() {
                   const inTop3 = rank <= 3;
 
                   const stat =
-                    sort === "winrate"  ? `${p.winRate.toFixed(1)}%`
-                  : sort === "winnings" ? `${fmt(p.totalWinnings)} ₵`
+                    sort === "points"   ? p.points.toLocaleString()
+                  : sort === "winrate"  ? `${p.winRate.toFixed(1)}%`
+                  : sort === "winnings" ? `${fmt(p.totalWinnings)} G$`
                   : String(p.gamesPlayed);
 
                   return (
@@ -304,7 +311,7 @@ export default function LeaderboardPage() {
                       </p>
 
                       {/* Primary stat */}
-                      <p className={`text-sm font-black text-right ${inTop3 ? rankText(rank) : "text-gray-400"}`}>
+                      <p className={`text-sm font-black text-right ${inTop3 ? (sort === "points" ? "text-amber-300" : rankText(rank)) : sort === "points" ? "text-amber-400/70" : "text-gray-400"}`}>
                         {stat}
                       </p>
                     </motion.div>
@@ -392,8 +399,8 @@ export default function LeaderboardPage() {
                       </div>
 
                       <div className="text-right shrink-0">
-                        <p className={`text-sm font-black ${rankText(rank)}`}>{fmt(p.totalWinnings)}</p>
-                        <p className="text-[9px] text-gray-700">CELO</p>
+                        <p className={`text-sm font-black ${rankText(rank)}`}>{p.points.toLocaleString()}</p>
+                        <p className="text-[9px] text-gray-700">pts</p>
                       </div>
                     </div>
                   );
@@ -410,8 +417,8 @@ export default function LeaderboardPage() {
                 {[
                   { label: "Total Players",  value: players.length },
                   { label: "Total Winners",  value: players.filter(p => p.gamesWon > 0).length },
+                  { label: "Top Points",     value: players.length ? Math.max(...players.map(p => p.points)).toLocaleString() : "0" },
                   { label: "Most Matches",   value: `${Math.max(...players.map(p => p.gamesPlayed))}G` },
-                  { label: "Top Win Rate",   value: `${(Math.max(...players.map(p => p.winRate))).toFixed(0)}%` },
                 ].map((s, i, arr) => (
                   <div key={s.label} className={`flex items-center justify-between px-4 py-3 ${i < arr.length - 1 ? "border-b border-white/[0.04]" : ""}`}>
                     <span className="text-xs text-gray-500">{s.label}</span>
