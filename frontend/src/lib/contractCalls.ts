@@ -1,6 +1,6 @@
 "use client";
 
-import { createPublicClient, http, fallback, parseEther, formatEther } from "viem";
+import { createPublicClient, http, fallback, parseEther, formatEther, encodeFunctionData, maxUint256 } from "viem";
 import { celo } from "wagmi/chains";
 import { BREEVS_ABI } from "./BreevsABI";
 export { BREEVS_ABI };
@@ -21,6 +21,32 @@ export const GD_TOKEN_ADDRESS = (
 
 // G$ on Celo uses 18-decimal representation (same pattern as CELO in the contract)
 export const GD_DECIMALS = 18;
+
+/** Canonical Multicall3 on Celo — batches approve + game call into one wallet popup. */
+export const MULTICALL3_ADDRESS =
+  "0xcA11bde05977b3631167020862e6a7231dbe341" as `0x${string}`;
+
+export const MULTICALL3_ABI = [
+  {
+    name: "aggregate",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "calls",
+        type: "tuple[]",
+        components: [
+          { name: "target", type: "address" },
+          { name: "callData", type: "bytes" },
+        ],
+      },
+    ],
+    outputs: [
+      { name: "blockNumber", type: "uint256" },
+      { name: "returnData", type: "bytes[]" },
+    ],
+  },
+] as const;
 
 // ─── GoodDollar Protocol Contracts (Identity + UBI Claim) ────────────────────
 
@@ -348,7 +374,70 @@ export async function getGDClaimEntitlement(address: string): Promise<bigint> {
 
 // ─── WRITE FUNCTION ARG BUILDERS ─────────────────────────────────────────────
 
-export function approveGDArgs(amount: bigint) {
+export async function getGDAllowance(owner: `0x${string}`): Promise<bigint> {
+  return publicClient.readContract({
+    address: GD_TOKEN_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: "allowance",
+    args: [owner, CONTRACT_ADDRESS],
+  }) as Promise<bigint>;
+}
+
+function gdApproveCalldata(): `0x${string}` {
+  return encodeFunctionData({
+    abi: ERC20_ABI,
+    functionName: "approve",
+    args: [CONTRACT_ADDRESS, maxUint256],
+  });
+}
+
+/** One tx: max-approve G$ + createGame (single wallet popup). */
+export function createGameWithApprovalArgs(roundDuration: bigint, stake: bigint = MIN_STAKE) {
+  return {
+    address: MULTICALL3_ADDRESS,
+    abi: MULTICALL3_ABI,
+    functionName: "aggregate" as const,
+    args: [
+      [
+        { target: GD_TOKEN_ADDRESS, callData: gdApproveCalldata() },
+        {
+          target: CONTRACT_ADDRESS,
+          callData: encodeFunctionData({
+            abi: BREEVS_ABI,
+            functionName: "createGame",
+            args: [stake, roundDuration],
+          }),
+        },
+      ],
+    ] as const,
+    chain: celo,
+  };
+}
+
+/** One tx: max-approve G$ + joinGame (single wallet popup). */
+export function joinGameWithApprovalArgs(gameId: bigint) {
+  return {
+    address: MULTICALL3_ADDRESS,
+    abi: MULTICALL3_ABI,
+    functionName: "aggregate" as const,
+    args: [
+      [
+        { target: GD_TOKEN_ADDRESS, callData: gdApproveCalldata() },
+        {
+          target: CONTRACT_ADDRESS,
+          callData: encodeFunctionData({
+            abi: BREEVS_ABI,
+            functionName: "joinGame",
+            args: [gameId],
+          }),
+        },
+      ],
+    ] as const,
+    chain: celo,
+  };
+}
+
+export function approveGDArgs(amount: bigint = maxUint256) {
   return {
     address: GD_TOKEN_ADDRESS,
     abi: ERC20_ABI,

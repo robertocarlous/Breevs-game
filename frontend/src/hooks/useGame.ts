@@ -29,8 +29,10 @@ import {
   getGDClaimEntitlement,
   approveGDArgs,
   createGameArgs,
+  createGameWithApprovalArgs,
   cancelGameArgs,
   joinGameArgs,
+  joinGameWithApprovalArgs,
   startGameArgs,
   spinRoundArgs,
   advanceRoundArgs,
@@ -309,23 +311,19 @@ function useContractWrite() {
   return { writeContractAsync, invalidate, address };
 }
 
-/** Checks current G$ allowance and approves if needed before a game action. */
-async function ensureGDApproval(
+/** One wallet popup: game action only, or Multicall3 batch [approve G$, action]. */
+async function writeGameAction(
   writeContractAsync: ReturnType<typeof useContractWrite>["writeContractAsync"],
-  owner: string,
-  amount: bigint
+  owner: `0x${string}`,
+  stakeAmount: bigint,
+  directArgs: ReturnType<typeof createGameArgs> | ReturnType<typeof joinGameArgs>,
+  batchedArgs: ReturnType<typeof createGameWithApprovalArgs> | ReturnType<typeof joinGameWithApprovalArgs>
 ) {
-  const allowance = await publicClient.readContract({
-    address: GD_TOKEN_ADDRESS,
-    abi: ERC20_ABI,
-    functionName: "allowance",
-    args: [owner as `0x${string}`, CONTRACT_ADDRESS],
-  }) as bigint;
-
-  if (allowance < amount) {
-    await writeContractAsync(approveGDArgs(amount));
-    // Invalidate allowance cache
+  const allowance = await getGDAllowance(owner);
+  if (allowance >= stakeAmount) {
+    return writeContractAsync(directArgs);
   }
+  return writeContractAsync(batchedArgs);
 }
 
 export function useCreateGame() {
@@ -338,8 +336,13 @@ export function useCreateGame() {
     setIsPending(true);
     setError(null);
     try {
-      await ensureGDApproval(writeContractAsync, address!, stake);
-      const hash = await writeContractAsync(createGameArgs(duration, stake));
+      const hash = await writeGameAction(
+        writeContractAsync,
+        address! as `0x${string}`,
+        stake,
+        createGameArgs(duration, stake),
+        createGameWithApprovalArgs(duration, stake)
+      );
       const receipt = await publicClient.getTransactionReceipt({ hash });
       const logs = parseEventLogs({ abi: BREEVS_ABI, logs: receipt.logs, eventName: "GameCreated" });
       const gameId = logs[0]?.args.gameId ?? await getTotalGames();
@@ -372,8 +375,13 @@ export function useJoinGame() {
     try {
       // Fetch the game's stake if not provided
       const stakeAmount = stake ?? (await getGameInfo(gameId)).stake;
-      await ensureGDApproval(writeContractAsync, address!, stakeAmount);
-      const hash = await writeContractAsync(joinGameArgs(gameId));
+      const hash = await writeGameAction(
+        writeContractAsync,
+        address! as `0x${string}`,
+        stakeAmount,
+        joinGameArgs(gameId),
+        joinGameWithApprovalArgs(gameId)
+      );
       invalidate();
       qc.invalidateQueries({ queryKey: ["gdBalance", address] });
       qc.invalidateQueries({ queryKey: ["gdAllowance", address] });
