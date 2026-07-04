@@ -24,7 +24,7 @@ export const GD_DECIMALS = 18;
 
 /** Canonical Multicall3 on Celo — batches approve + game call into one wallet popup. */
 export const MULTICALL3_ADDRESS =
-  "0xcA11bde05977b3631167020862e6a7231dbe341" as `0x${string}`;
+  "0xcA11bde05977b3631167028862bE2a173976CA11" as `0x${string}`;
 
 export const MULTICALL3_ABI = [
   {
